@@ -1,5 +1,18 @@
 # Pipeline v8 - Critical Bug Fixes
 
+## Current Pipeline Context (v8.1)
+
+The **current** pipeline in this repository (`clean_pipeline_v8.1`) trains a
+**neural spline flow (NSF)** posterior estimator by default. The fixes described
+below remain relevant because they address **simulation filtering** and
+**parameter transformations** that apply regardless of the NPE architecture.
+
+In v8.1, the **time-ordering check was disabled** in post-processing to avoid
+false positives caused by diagonal covariance assumptions; see
+`clean_pipeline_v8.1/CHANGELOG_v8.1.md` for details.
+
+---
+
 ## Executive Summary
 
 **Version 8 fixes THREE CRITICAL BUGS in v7 that would have corrupted results.**
