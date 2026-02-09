@@ -7,8 +7,6 @@ statistics, and neural posterior estimation using a **neural spline flow (NSF)**
 > **Version note:** v8.1 enforces time ordering via **cumulative-gap
 > parameterization** in `transforms.py`, so no post-hoc filtering is required.
 > The v8.1 changelog documents the removal of the prior check; see
-> **Version note:** v8.1 disables a time-ordering check in post-processing that
-> produced false positives when using diagonal covariance models; see
 > `CHANGELOG_v8.1.md` for full context.
 
 ---
