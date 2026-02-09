@@ -48,7 +48,7 @@ def main():
     if not post_file.exists():
         print(f"✗ ERROR: Posterior file not found: {post_file}")
         print("  Run inference first:")
-        print("    python3 python/infer_posterior.py --model models/mdn_model.pt \\")
+        print("    python3 python/infer_posterior.py --model models/nsf_model.pt \\")
         print("      --obs observed_data/pod_summaries.npz --out results/pod_posterior.npz")
         sys.exit(1)
     
@@ -148,7 +148,7 @@ def main():
         print("⚠ WARNING: Coverage is low. Model may be overconfident.")
         print("  Recommendations:")
         print("    - Generate more training simulations (50k+)")
-        print("    - Increase MDN complexity (more hidden units/components)")
+        print("    - Increase NSF capacity (more layers/hidden units)")
         print("    - Check for bugs in summary statistic computation")
     else:
         print("✗ POOR: Coverage is very low. Model is not working properly!")

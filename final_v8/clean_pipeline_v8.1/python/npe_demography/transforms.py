@@ -2,18 +2,48 @@
 
 This module handles transformations between biological (constrained) and
 unconstrained spaces for neural density estimation. By working in unconstrained
-space, the MDN can freely sample from Gaussian distributions without violating
+space, the NSF can learn flexible posteriors without violating
 constraints, and then we transform back to biological parameters.
 
 Transformations:
-  - Positive-only (Ne, T): log transform
+  - Positive-only (Ne, gap-encoded T): log transform
   - Fractions [0,1]: logit transform
   - Durations: log transform (if positive-only)
+  - Times: cumulative gap parameterization to enforce ordering constraints
 """
 from __future__ import annotations
 
 from typing import Dict, Any, Tuple
 import numpy as np
+
+TIME_GAP_DEPENDENCIES = {
+    "T_BG01": None,
+    "T_CORE": "T_BG01",
+    "T_SOUTH_LOW": "T_CORE",
+    "T_EAST": "T_SOUTH_LOW",
+    "T_SOUTH_MID": "T_CORE",
+    "T_INT": "T_CORE",
+    "T_CENTRAL": "T_INT",
+    "T_PYRENEES": "T_INT",
+}
+
+TIME_GAP_ORDER = [
+    "T_BG01",
+    "T_CORE",
+    "T_SOUTH_LOW",
+    "T_EAST",
+    "T_SOUTH_MID",
+    "T_INT",
+    "T_CENTRAL",
+    "T_PYRENEES",
+]
+
+
+def _get_time_gap_parent(key: str, available: set[str]) -> str | None:
+    parent = TIME_GAP_DEPENDENCIES.get(key)
+    if parent in available:
+        return parent
+    return None
 
 
 # Small epsilon to avoid log(0) and division by zero
@@ -23,7 +53,7 @@ EPS = 1e-8
 def transform_to_unconstrained(params: Dict[str, Any], theta_keys: Tuple[str, ...]) -> Dict[str, float]:
     """Transform biological parameters to unconstrained space.
     
-    This transformation ensures the MDN learns in a space where:
+    This transformation ensures the NSF learns in a space where:
     - All real values are valid (no positivity constraints)
     - Gaussian distributions make sense
     - Standardization doesn't break constraints
@@ -54,11 +84,15 @@ def transform_to_unconstrained(params: Dict[str, Any], theta_keys: Tuple[str, ..
                 raise ValueError(f"{key}={value} must be positive for log transform")
             unconstrained[key] = np.log(value)
         
-        # Times: log transform (must be positive)
+        # Times: cumulative gap parameterization (must respect ordering)
         elif key.startswith('T_'):
-            if value <= 0:
-                raise ValueError(f"{key}={value} must be positive for log transform")
-            unconstrained[key] = np.log(value)
+            available = set(theta_keys)
+            parent = _get_time_gap_parent(key, available)
+            base = float(params[parent]) if parent is not None else 0.0
+            gap = float(value) - base
+            if gap <= 0:
+                raise ValueError(f"{key}={value} must be > parent time {base} for gap transform")
+            unconstrained[key] = np.log(gap)
         
         # Fractions [0,1]: logit transform
         # CRITICAL: Match ANY key containing '_FRAC' to catch per-population params
@@ -83,7 +117,7 @@ def transform_to_unconstrained(params: Dict[str, Any], theta_keys: Tuple[str, ..
     return unconstrained
 
 
-def inverse_transform_from_unconstrained(unconstrained: Dict[str, float], 
+def inverse_transform_from_unconstrained(unconstrained: Dict[str, float],
                                         theta_keys: Tuple[str, ...]) -> Dict[str, float]:
     """Transform unconstrained parameters back to biological space.
     
@@ -111,7 +145,7 @@ def inverse_transform_from_unconstrained(unconstrained: Dict[str, float],
         if key.startswith('N_'):
             biological[key] = np.exp(value)
         
-        # Times: exp transform
+        # Times: exp transform (gap space)
         elif key.startswith('T_'):
             biological[key] = np.exp(value)
         
@@ -130,6 +164,15 @@ def inverse_transform_from_unconstrained(unconstrained: Dict[str, float],
         else:
             biological[key] = value
     
+    available = set(theta_keys)
+    for key in TIME_GAP_ORDER:
+        if key not in available:
+            continue
+        parent = _get_time_gap_parent(key, available)
+        if parent is None:
+            continue
+        biological[key] = biological[parent] + biological[key]
+
     return biological
 
 
@@ -243,3 +286,13 @@ def validate_biological_params(params: Dict[str, Any], theta_keys: Tuple[str, ..
         elif key == 'BN_DUR' or key.startswith('BN_DUR_'):
             if value <= 0:
                 raise ValueError(f"Duration {key}={value} must be positive")
+
+    available = set(theta_keys)
+    for key in TIME_GAP_ORDER:
+        if key not in available:
+            continue
+        parent = _get_time_gap_parent(key, available)
+        if parent is None or parent not in params:
+            continue
+        if params[key] <= params[parent]:
+            raise ValueError(f"Time ordering violated: {key}={params[key]} <= {parent}={params[parent]}")
