@@ -82,7 +82,7 @@ def _one_sim(storage_idx: int, seed_idx: int, cfg: Dict[str, Any], pop_order: Li
     )
 
     # theta vector: biological parameters in UNCONSTRAINED space
-    # This allows the MDN to learn without constraint violations
+    # This allows the NSF to learn without constraint violations
     theta_bio = theta_vector(params, theta_keys)
     theta = transform_theta_vector(theta_bio, theta_keys)
 

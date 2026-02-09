@@ -11,14 +11,14 @@ import torch
 from torch.utils.data import DataLoader, TensorDataset
 
 from npe_demography.config import load_config, ensure_dir
-from npe_demography.mdn import MDN, mdn_nll
+from npe_demography.nsf import FlowConfig, NeuralSplineFlow
 
 
 def build_argparser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(description="Train MDN NPE model.")
+    p = argparse.ArgumentParser(description="Train NSF NPE model.")
     p.add_argument("--config", required=True, help="Path to config YAML")
     p.add_argument("--simulations", default="simulations/sim_data.npz", help="Input .npz from simulate.py")
-    p.add_argument("--out", default="models/mdn_model.pt", help="Output model path")
+    p.add_argument("--out", default="models/nsf_model.pt", help="Output model path")
     p.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     return p
 
@@ -87,11 +87,21 @@ def main() -> None:
 
     device = torch.device(args.device)
 
-    model = MDN(
-        x_dim=X.shape[1],
+    flow_cfg = cfg["npe"].get("flow", {})
+    flow_config = FlowConfig(
+        hidden_sizes=list(flow_cfg.get("hidden_sizes", cfg["npe"].get("hidden_sizes", [256, 256]))),
+        num_layers=int(flow_cfg.get("num_layers", 6)),
+        num_bins=int(flow_cfg.get("num_bins", 8)),
+        tail_bound=float(flow_cfg.get("tail_bound", 3.0)),
+        min_bin_width=float(flow_cfg.get("min_bin_width", 1e-3)),
+        min_bin_height=float(flow_cfg.get("min_bin_height", 1e-3)),
+        min_derivative=float(flow_cfg.get("min_derivative", 1e-3)),
+    )
+
+    model = NeuralSplineFlow(
         theta_dim=Theta.shape[1],
-        hidden=list(cfg["npe"].get("hidden_sizes", [256, 256, 256])),
-        n_components=int(cfg["npe"].get("n_components", 8)),
+        context_dim=X.shape[1],
+        config=flow_config,
     ).to(device)
 
     opt = torch.optim.AdamW(
@@ -112,8 +122,8 @@ def main() -> None:
         for xb, tb in dl_tr:
             xb = xb.to(device)
             tb = tb.to(device)
-            pi, mu, log_sigma = model(xb)
-            loss = mdn_nll(pi, mu, log_sigma, tb)
+            log_prob = model.log_prob(tb, xb)
+            loss = -log_prob.mean()
             opt.zero_grad()
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
@@ -127,8 +137,8 @@ def main() -> None:
             for xb, tb in dl_va:
                 xb = xb.to(device)
                 tb = tb.to(device)
-                pi, mu, log_sigma = model(xb)
-                loss = mdn_nll(pi, mu, log_sigma, tb)
+                log_prob = model.log_prob(tb, xb)
+                loss = -log_prob.mean()
                 va_loss += float(loss.item()) * xb.shape[0]
         va_loss /= len(ds_va)
 
@@ -143,13 +153,22 @@ def main() -> None:
                     "state_dict": model.state_dict(),
                     "x_dim": X.shape[1],
                     "theta_dim": Theta.shape[1],
-                    "hidden": list(cfg["npe"].get("hidden_sizes", [256, 256, 256])),
-                    "n_components": int(cfg["npe"].get("n_components", 8)),
+                    "model_type": "nsf",
+                    "flow_config": {
+                        "hidden_sizes": list(flow_config.hidden_sizes),
+                        "num_layers": flow_config.num_layers,
+                        "num_bins": flow_config.num_bins,
+                        "tail_bound": flow_config.tail_bound,
+                        "min_bin_width": flow_config.min_bin_width,
+                        "min_bin_height": flow_config.min_bin_height,
+                        "min_derivative": flow_config.min_derivative,
+                    },
                     "theta_keys": theta_keys,
                     "pop_order": pop_order,
                     "x_scaler": x_scaler,
                     "theta_scaler": t_scaler,
                     "config_path": str(args.config),
+                    "n_posterior_samples": int(cfg["npe"].get("n_posterior_samples", 50000)),
                 },
                 args.out,
             )

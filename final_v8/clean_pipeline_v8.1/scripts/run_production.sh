@@ -51,14 +51,14 @@ python3 python/simulate.py \
 echo "Finished at: $(date)"
 echo ""
 
-echo "Step 3/4: Training neural posterior estimator..."
+echo "Step 3/4: Training neural spline flow..."
 echo "----------------------------------------------------------------------"
 echo "This will take 30-90 minutes..."
 echo "Started at: $(date)"
 python3 python/train_npe.py \
   --config "$CONFIG" \
   --simulations simulations/sim_data.npz \
-  --out models/mdn_model.pt
+  --out models/nsf_model.pt
 echo "Finished at: $(date)"
 echo ""
 
@@ -66,7 +66,7 @@ echo "Step 4/4: Inferring posterior distribution..."
 echo "----------------------------------------------------------------------"
 echo "Sampling 100,000 parameter sets from posterior..."
 python3 python/infer_posterior.py \
-  --model models/mdn_model.pt \
+  --model models/nsf_model.pt \
   --obs observed_data/observed_summaries.npz \
   --out results/posterior_samples.npz
 echo ""

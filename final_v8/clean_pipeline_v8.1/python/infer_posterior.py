@@ -9,7 +9,7 @@ from typing import Dict, Optional, List
 import numpy as np
 import torch
 
-from npe_demography.mdn import MDN, mdn_sample
+from npe_demography.nsf import FlowConfig, NeuralSplineFlow
 from npe_demography.transforms import inverse_transform_theta_vector
 
 
@@ -72,9 +72,9 @@ def _check_time_ordering(theta: np.ndarray, param_names: List[str]) -> np.ndarra
 
 def build_argparser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        description="Infer posterior from a trained MDN using observed summaries."
+        description="Infer posterior from a trained NSF using observed summaries."
     )
-    p.add_argument("--model", default="models/mdn_model.pt", help="Trained model .pt")
+    p.add_argument("--model", default="models/nsf_model.pt", help="Trained model .pt")
     p.add_argument("--obs", default="observed_data/observed_summaries.npz",
                     help="Observed summaries .npz (must contain x or x_obs)")
     p.add_argument("--out", default="results/posterior_samples.npz",
@@ -136,11 +136,24 @@ def main() -> None:
 
     device = torch.device(args.device)
 
-    model = MDN(
-        x_dim=x_dim,
+    if ckpt.get("model_type") != "nsf":
+        raise ValueError("Checkpoint is not a Neural Spline Flow model.")
+
+    flow_cfg = ckpt.get("flow_config", {})
+    flow_config = FlowConfig(
+        hidden_sizes=list(flow_cfg.get("hidden_sizes", [256, 256])),
+        num_layers=int(flow_cfg.get("num_layers", 6)),
+        num_bins=int(flow_cfg.get("num_bins", 8)),
+        tail_bound=float(flow_cfg.get("tail_bound", 3.0)),
+        min_bin_width=float(flow_cfg.get("min_bin_width", 1e-3)),
+        min_bin_height=float(flow_cfg.get("min_bin_height", 1e-3)),
+        min_derivative=float(flow_cfg.get("min_derivative", 1e-3)),
+    )
+
+    model = NeuralSplineFlow(
         theta_dim=theta_dim,
-        hidden=list(ckpt["hidden"]),
-        n_components=int(ckpt["n_components"]),
+        context_dim=x_dim,
+        config=flow_config,
     ).to(device)
 
     model.load_state_dict(ckpt["state_dict"])
@@ -178,10 +191,9 @@ def main() -> None:
     n_samples = args.n if args.n is not None else int(ckpt.get("n_posterior_samples", 50000))
     print(f"Sampling {n_samples:,} posterior samples...")
 
-    # Use vectorised MDN sampling (much faster than the per-sample for-loop)
+    # Use vectorised NSF sampling (much faster than the per-sample for-loop)
     with torch.no_grad():
-        pi, mu, log_sigma = model(x_t)
-        theta_post_t = mdn_sample(pi, mu, log_sigma, n_samples)  # (n, theta_dim)
+        theta_post_t = model.sample(n_samples, x_t)  # (n, theta_dim)
 
     theta_post = theta_post_t.cpu().numpy().astype(np.float32)
     
@@ -191,19 +203,7 @@ def main() -> None:
     # Transform from unconstrained to biological space
     theta_post = inverse_transform_theta_vector(theta_post, param_names)
     
-    # NOTE: Time ordering check disabled in v8.1
-    # The training data has perfect ordering in log-space, but the MDN's
-    # diagonal covariance means independent sampling can violate ordering
-    # after exp() transform. This is a limitation of diagonal Gaussian mixtures,
-    # not a bug. Solutions: (1) use normalizing flows, or (2) reparameterize
-    # times as cumulative gaps. For now, we accept ~10-20% violations as
-    # a known limitation of the MDN architecture.
-    #
-    # To re-enable checking (and filter violations):
-    # valid_mask = _check_time_ordering(theta_post, param_names)
-    # if (~valid_mask).any():
-    #     print(f"WARNING: {(~valid_mask).sum()} samples violate time ordering")
-    #     theta_post = theta_post[valid_mask]
+    # Time ordering is enforced by cumulative-gap parameterization in transforms.
 
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)

@@ -77,7 +77,11 @@ npe:
   batch_size: 128
   num_workers: 70
   hidden_sizes: [256, 256]
-  n_components: 16  # Increased from 8 to better handle correlations (v8 fix)
+  flow:
+    hidden_sizes: [256, 256]
+    num_layers: 6
+    num_bins: 8
+    tail_bound: 3.0
   lr: 0.0005
   weight_decay: 0.00001
   max_epochs: 100

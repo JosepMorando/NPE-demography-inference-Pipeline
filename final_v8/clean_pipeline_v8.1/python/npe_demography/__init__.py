@@ -1,1 +1,1 @@
-"""NPE demographic inference utilities (SLiM + TreeSeq + MDN)."""
+"""NPE demographic inference utilities (SLiM + TreeSeq + NSF)."""
