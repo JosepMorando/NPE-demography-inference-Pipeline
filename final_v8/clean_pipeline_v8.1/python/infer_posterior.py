@@ -4,11 +4,12 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-from typing import Dict, Optional, List
+from typing import Dict, Optional, List, Tuple
 
 import numpy as np
 import torch
 
+from npe_demography.config import load_config
 from npe_demography.nsf import FlowConfig, NeuralSplineFlow
 from npe_demography.transforms import inverse_transform_theta_vector
 
@@ -70,6 +71,45 @@ def _check_time_ordering(theta: np.ndarray, param_names: List[str]) -> np.ndarra
     return valid
 
 
+def _extract_prior_bounds(cfg: Dict[str, object], param_names: List[str]) -> Dict[str, Tuple[float, float]]:
+    priors = cfg.get("priors")
+    if not isinstance(priors, dict):
+        raise ValueError("Config missing 'priors' mapping.")
+
+    times_cfg = priors.get("times", {})
+    sizes_cfg = priors.get("sizes", {})
+    if not isinstance(times_cfg, dict) or not isinstance(sizes_cfg, dict):
+        raise ValueError("Config priors.times and priors.sizes must be mappings.")
+
+    bounds: Dict[str, Tuple[float, float]] = {}
+    for name in param_names:
+        if name in times_cfg:
+            t_cfg = times_cfg[name]
+            bounds[name] = (float(t_cfg["min"]), float(t_cfg["max"]))
+        elif name in sizes_cfg:
+            s_cfg = sizes_cfg[name]
+            if str(s_cfg.get("dist", "")).lower() == "fixed":
+                continue
+            if "min" in s_cfg and "max" in s_cfg:
+                bounds[name] = (float(s_cfg["min"]), float(s_cfg["max"]))
+    return bounds
+
+
+def _mask_with_bounds(
+    theta: np.ndarray,
+    param_names: List[str],
+    bounds: Dict[str, Tuple[float, float]],
+) -> np.ndarray:
+    n_samples = theta.shape[0]
+    mask = np.ones(n_samples, dtype=bool)
+    for i, name in enumerate(param_names):
+        if name not in bounds:
+            continue
+        min_val, max_val = bounds[name]
+        mask &= (theta[:, i] >= min_val) & (theta[:, i] <= max_val)
+    return mask
+
+
 def build_argparser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         description="Infer posterior from a trained NSF using observed summaries."
@@ -77,6 +117,11 @@ def build_argparser() -> argparse.ArgumentParser:
     p.add_argument("--model", default="models/nsf_model.pt", help="Trained model .pt")
     p.add_argument("--obs", default="observed_data/observed_summaries.npz",
                     help="Observed summaries .npz (must contain x or x_obs)")
+    p.add_argument(
+        "--config",
+        required=True,
+        help="YAML config file for enforcing prior bounds during inference.",
+    )
     p.add_argument("--out", default="results/posterior_samples.npz",
                     help="Output posterior samples (.npz)")
     p.add_argument("--n", type=int, default=None,
@@ -191,19 +236,56 @@ def main() -> None:
     n_samples = args.n if args.n is not None else int(ckpt.get("n_posterior_samples", 50000))
     print(f"Sampling {n_samples:,} posterior samples...")
 
-    # Use vectorised NSF sampling (much faster than the per-sample for-loop)
-    with torch.no_grad():
-        theta_post_t = model.sample(n_samples, x_t)  # (n, theta_dim)
+    cfg = load_config(args.config)
+    bounds = _extract_prior_bounds(cfg, param_names)
+    if not bounds:
+        raise ValueError(
+            f"No matching prior bounds found in {args.config}; "
+            "ensure priors.times and priors.sizes match the trained parameter names."
+        )
+    print(f"Applying prior bounds from {args.config}")
 
-    theta_post = theta_post_t.cpu().numpy().astype(np.float32)
-    
-    # De-standardize from training space
-    theta_post = _invert_scaler(theta_post, theta_scaler)
-    
-    # Transform from unconstrained to biological space
-    theta_post = inverse_transform_theta_vector(theta_post, param_names)
-    
-    # Time ordering is enforced by cumulative-gap parameterization in transforms.
+    accepted: List[np.ndarray] = []
+    total_draws = 0
+    remaining = n_samples
+    max_draws = max(n_samples * 100, 10000)
+    while remaining > 0:
+        if total_draws >= max_draws:
+            raise RuntimeError(
+                "Failed to collect enough posterior samples within prior bounds. "
+                "Consider increasing n or widening prior ranges."
+            )
+        batch_size = max(1000, remaining)
+        total_draws += batch_size
+
+        # Use vectorised NSF sampling (much faster than the per-sample for-loop)
+        with torch.no_grad():
+            theta_post_t = model.sample(batch_size, x_t)  # (n, theta_dim)
+
+        theta_post = theta_post_t.cpu().numpy().astype(np.float32)
+
+        # De-standardize from training space
+        theta_post = _invert_scaler(theta_post, theta_scaler)
+
+        # Transform from unconstrained to biological space
+        theta_post = inverse_transform_theta_vector(theta_post, param_names)
+
+        # Time ordering is enforced by cumulative-gap parameterization in transforms.
+
+        mask = _mask_with_bounds(theta_post, param_names, bounds)
+        mask &= _check_time_ordering(theta_post, param_names)
+        theta_post = theta_post[mask]
+
+        if theta_post.size == 0:
+            continue
+
+        accepted.append(theta_post)
+        remaining = n_samples - sum(chunk.shape[0] for chunk in accepted)
+
+    theta_post = np.concatenate(accepted, axis=0)[:n_samples]
+    if total_draws > 0:
+        acceptance = theta_post.shape[0] / total_draws
+        print(f"Accepted {theta_post.shape[0]:,} / {total_draws:,} samples ({acceptance:.2%}).")
 
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
