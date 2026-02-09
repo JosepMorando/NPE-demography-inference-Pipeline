@@ -124,6 +124,7 @@ if [[ "$NEW_SIMS" -gt 0 ]]; then
 
   PARTS=()
   PIDS=()
+  SEED_CURSOR="$SEED_OFFSET"
 
   for i in "${!NODES[@]}"; do
     node="${NODES[$i]}"
@@ -139,7 +140,10 @@ if [[ "$NEW_SIMS" -gt 0 ]]; then
     # Create unique temp directory for this node
     NODE_TMPDIR="/tmp/sim_scratch_${node}_$$"
 
-    echo "[${node}] launching: n=${n_chunk}, workers=${WORKERS_PER_NODE}, out=${part_out}, tmpdir=${NODE_TMPDIR}"
+    NODE_SEED_OFFSET="$SEED_CURSOR"
+    SEED_CURSOR=$(( SEED_CURSOR + n_chunk ))
+
+    echo "[${node}] launching: n=${n_chunk}, workers=${WORKERS_PER_NODE}, out=${part_out}, seed_offset=${NODE_SEED_OFFSET}, tmpdir=${NODE_TMPDIR}"
 
     ssh "$node" "cd '$PROJECT_ROOT' && \
       mkdir -p '${NODE_TMPDIR}' && \
@@ -149,7 +153,7 @@ if [[ "$NEW_SIMS" -gt 0 ]]; then
         --config '$CONFIG' \
         --n '$n_chunk' \
         --out '$part_out' \
-        --seed-offset '$SEED_OFFSET' \
+        --seed-offset '$NODE_SEED_OFFSET' \
         --workers '$WORKERS_PER_NODE' \
         --tmpdir '${NODE_TMPDIR}' && \
       rm -rf '${NODE_TMPDIR}'" &
