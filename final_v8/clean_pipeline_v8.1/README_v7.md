@@ -1,4 +1,7 @@
-# NPE Demographic Inference Pipeline - Version 7.0
+# NPE Demographic Inference Pipeline - Version 7.0 (Historical)
+
+> **Note:** This document is kept for reference. The current pipeline is v8.1;
+> see `README_v8.1.md` in this directory for the up-to-date workflow.
 
 Quick reference for v7 changes and usage.
 
