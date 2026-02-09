@@ -1,20 +1,14 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 import numpy as np
 import tskit
 import msprime
-
-
-def _upper_tri_flat(m: np.ndarray) -> np.ndarray:
-    n = m.shape[0]
-    out = []
-    for i in range(n - 1):
-        out.append(m[i, i + 1:])
-    return np.concatenate(out, axis=0) if out else np.array([], dtype=m.dtype)
 
 
 def _get_population_name(ts: tskit.TreeSequence, pop_id: int) -> str:
@@ -93,6 +87,61 @@ def thin_variants(ts: tskit.TreeSequence, target_snps: int, rng: np.random.Gener
     return ts.delete_sites(delete)
 
 
+def _run_poolfstat_summaries(
+    alt_counts: np.ndarray,
+    pop_order: List[str],
+    n_hap_per_pop: int,
+    cfg: Dict[str, Any],
+    rng: np.random.Generator,
+    workdir: Path,
+) -> Tuple[np.ndarray, Dict[str, Any]]:
+    target_cov = int(cfg.get("observed", {}).get("target_cov", n_hap_per_pop))
+    pool_sizes = np.full(len(pop_order), max(1, n_hap_per_pop // 2), dtype=np.int32)
+    seed = int(rng.integers(1, 2**31 - 1))
+
+    counts_path = workdir / "sim_counts.npz"
+    out_dir = workdir / "poolfstat_out"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    np.savez_compressed(
+        counts_path,
+        alt_counts=alt_counts.astype(np.int32),
+        n_hap_per_pop=np.int32(n_hap_per_pop),
+        group_order=np.array(pop_order, dtype=object),
+        target_cov=np.int32(target_cov),
+        pool_sizes=pool_sizes,
+        seed=np.int32(seed),
+    )
+
+    repo_root = Path(__file__).resolve().parents[2]
+    r_script = repo_root / "r" / "compute_sim_summaries.R"
+    cmd = ["Rscript", str(r_script), "--counts", str(counts_path), "--out", str(out_dir)]
+
+    try:
+        subprocess.run(cmd, check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as exc:
+        raise RuntimeError(
+            "poolfstat summary computation failed.\n"
+            f"Command: {' '.join(cmd)}\n"
+            f"stdout:\n{exc.stdout}\n"
+            f"stderr:\n{exc.stderr}"
+        ) from exc
+
+    summary_path = out_dir / "sim_summaries.npz"
+    if not summary_path.exists():
+        raise FileNotFoundError(f"Missing poolfstat output: {summary_path}")
+
+    data = np.load(summary_path, allow_pickle=True)
+    x = np.array(data["x"], dtype=np.float32)
+    meta = {
+        "target_cov": target_cov,
+        "pool_sizes": pool_sizes.tolist(),
+        "group_order": pop_order,
+        "seed": seed,
+    }
+    return x, meta
+
+
 def compute_summaries_from_trees(
     trees_path: str | Path,
     pop_order: List[str],
@@ -138,65 +187,31 @@ def compute_summaries_from_trees(
     gm = np.asarray(gm, dtype=np.int8)
 
     k = len(pop_order)
-    half = n_hap_per_pop // 2
-    bins = half + 1
-
-    sfs1d = np.zeros((k, bins), dtype=np.float32)
-    het = np.zeros(k, dtype=np.float32)
-    pmat = np.zeros((gm.shape[0], k), dtype=np.float32)
+    alt_counts = np.zeros((gm.shape[0], k), dtype=np.int32)
 
     idx0 = 0
     for i in range(k):
         idx1 = idx0 + n_hap_per_pop
         g = gm[:, idx0:idx1]
-        ac = g.sum(axis=1)  # 0..n
-        # folded counts
-        folded = np.minimum(ac, n_hap_per_pop - ac)
-        for b in range(bins):
-            sfs1d[i, b] = np.mean(folded == b)
-
-        p = ac / float(n_hap_per_pop)
-        pmat[:, i] = p
-        het[i] = float(np.mean(2 * p * (1 - p)))
+        alt_counts[:, i] = g.sum(axis=1)
         idx0 = idx1
 
-    # Pairwise Dxy and Hudson Fst
-    dxy = np.zeros((k, k), dtype=np.float32)
-    fst = np.zeros((k, k), dtype=np.float32)
-    n = float(n_hap_per_pop)
-
-    for i in range(k):
-        pi = pmat[:, i]
-        for j in range(i + 1, k):
-            pj = pmat[:, j]
-            d = pi + pj - 2 * pi * pj
-            dxy[i, j] = dxy[j, i] = float(np.mean(d))
-
-            # Hudson Fst
-            a = (pi - pj) ** 2 - (pi * (1 - pi)) / (n - 1.0) - (pj * (1 - pj)) / (n - 1.0)
-            b_val = pi * (1 - pj) + pj * (1 - pi)
-            num = float(np.sum(a))
-            den = float(np.sum(b_val))
-            f = 0.0 if den <= 0 else max(0.0, min(1.0, num / den))
-            fst[i, j] = fst[j, i] = f
-
-    # Flatten summaries
-    x = np.concatenate(
-        [
-            sfs1d.reshape(-1),
-            het.reshape(-1),
-            _upper_tri_flat(dxy),
-            _upper_tri_flat(fst),
-        ],
-        axis=0,
-    ).astype(np.float32)
+    with tempfile.TemporaryDirectory(dir=str(trees_path.parent)) as tmpdir:
+        x, pf_meta = _run_poolfstat_summaries(
+            alt_counts=alt_counts,
+            pop_order=pop_order,
+            n_hap_per_pop=n_hap_per_pop,
+            cfg=cfg,
+            rng=rng,
+            workdir=Path(tmpdir),
+        )
 
     meta = {
         "pop_order": pop_order,
         "n_hap_per_pop": n_hap_per_pop,
-        "sfs1d_bins": bins,
         "n_sites": int(ts.num_sites),
         "n_variants": int(gm.shape[0]),
         "scale_used": scale_used,
+        **pf_meta,
     }
     return x, meta
