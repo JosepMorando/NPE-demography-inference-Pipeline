@@ -92,6 +92,52 @@ def _extract_prior_bounds(cfg: Dict[str, object], param_names: List[str]) -> Dic
                 continue
             if "min" in s_cfg and "max" in s_cfg:
                 bounds[name] = (float(s_cfg["min"]), float(s_cfg["max"]))
+
+    extras = priors.get("demography_extras", {})
+    if isinstance(extras, dict) and bool(extras.get("enable", False)):
+        bn = extras.get("bottleneck", {})
+        if isinstance(bn, dict):
+            bn_mode = str(bn.get("mode", "shared")).lower()
+            time_frac = bn.get("time_fraction", {})
+            size_frac = bn.get("size_fraction", {})
+            dur_cfg = bn.get("duration_gens", {})
+            if bn_mode == "shared":
+                if "BN_TIME_FRAC" in param_names:
+                    bounds["BN_TIME_FRAC"] = (float(time_frac["min"]), float(time_frac["max"]))
+                if "BN_SIZE_FRAC" in param_names:
+                    bounds["BN_SIZE_FRAC"] = (float(size_frac["min"]), float(size_frac["max"]))
+                if "BN_DUR" in param_names:
+                    bounds["BN_DUR"] = (float(dur_cfg["min"]), float(dur_cfg["max"]))
+            elif bn_mode == "per_population":
+                pops = ["BG01", "SOUTH_LOW", "SOUTH_MID", "EAST", "CENTRAL", "PYRENEES"]
+                for pop in pops:
+                    time_key = f"BN_TIME_FRAC_{pop}"
+                    size_key = f"BN_SIZE_FRAC_{pop}"
+                    dur_key = f"BN_DUR_{pop}"
+                    if time_key in param_names:
+                        bounds[time_key] = (float(time_frac["min"]), float(time_frac["max"]))
+                    if size_key in param_names:
+                        bounds[size_key] = (float(size_frac["min"]), float(size_frac["max"]))
+                    if dur_key in param_names:
+                        bounds[dur_key] = (float(dur_cfg["min"]), float(dur_cfg["max"]))
+
+        ex = extras.get("expansion", {})
+        if isinstance(ex, dict) and bool(ex.get("enable", True)):
+            start_cfg = ex.get("start_fraction", {})
+            rate_cfg = ex.get("rate", {})
+            if "EXP_START_FRAC" in param_names:
+                bounds["EXP_START_FRAC"] = (float(start_cfg["min"]), float(start_cfg["max"]))
+            if "EXP_RATE" in param_names:
+                bounds["EXP_RATE"] = (float(rate_cfg["min"]), float(rate_cfg["max"]))
+
+        mig = extras.get("migration", {})
+        if isinstance(mig, dict) and bool(mig.get("enable", False)):
+            m_cfg = mig.get("m", {})
+            start_cfg = mig.get("start_fraction", {})
+            if "MIG_M" in param_names:
+                bounds["MIG_M"] = (float(m_cfg["min"]), float(m_cfg["max"]))
+            if "MIG_START_FRAC" in param_names:
+                bounds["MIG_START_FRAC"] = (float(start_cfg["min"]), float(start_cfg["max"]))
     return bounds
 
 

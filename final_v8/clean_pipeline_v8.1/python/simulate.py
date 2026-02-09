@@ -38,6 +38,8 @@ def build_argparser() -> argparse.ArgumentParser:
     p.add_argument("--out", default="simulations/sim_data.npz", help="Output .npz path")
     p.add_argument("--workers", type=int, default=None, help="Parallel workers (overrides config.npe.num_workers)")
     p.add_argument("--timeout", type=float, default=None, help="Optional SLiM timeout (seconds)")
+    p.add_argument("--pilot-retries", type=int, default=None,
+                   help="Retries for the pilot simulation if zero SNPs are produced.")
     p.add_argument("--seed-offset", type=int, default=0,
                    help="Offset added to simulation indices for seed generation. "
                         "Use when appending to existing sims to avoid seed overlap.")
@@ -139,6 +141,11 @@ def main() -> None:
 
     base_seed = int(cfg.get("project", {}).get("seed", 42))
     seed_offset = int(args.seed_offset)
+    pilot_retries = int(
+        args.pilot_retries
+        if args.pilot_retries is not None
+        else cfg.get("simulation", {}).get("pilot_retries", 3)
+    )
 
     max_scale = int(cfg["simulation"].get("max_scale_factor",
                         cfg["simulation"].get("scale_factor", 200)))
@@ -149,7 +156,37 @@ def main() -> None:
 
     # Pilot simulation to determine array shapes
     print("Running pilot simulation to determine array dimensions...")
-    _, x_pilot, theta_pilot, _ = _one_sim(0, seed_offset + 0, cfg, pop_order, theta_keys_t, base_seed, tmpdir, args.timeout)
+    pilot_meta = None
+    for attempt in range(pilot_retries + 1):
+        try:
+            _, x_pilot, theta_pilot, pilot_meta = _one_sim(
+                0,
+                seed_offset + attempt,
+                cfg,
+                pop_order,
+                theta_keys_t,
+                base_seed,
+                tmpdir,
+                args.timeout,
+            )
+        except Exception as exc:
+            if attempt >= pilot_retries:
+                raise
+            print(f"WARNING: Pilot simulation failed ({exc}). Retrying ({attempt + 1}/{pilot_retries})...")
+            continue
+
+        n_variants = int(pilot_meta.get("n_variants", 0)) if pilot_meta else 0
+        if n_variants > 0:
+            break
+        if attempt >= pilot_retries:
+            raise RuntimeError(
+                "Pilot simulation produced zero SNPs after retries. "
+                "Consider increasing mutation rate or adjusting simulation settings."
+            )
+        print(
+            "WARNING: Pilot simulation produced zero SNPs. "
+            f"Retrying ({attempt + 1}/{pilot_retries})..."
+        )
 
     x_dim = len(x_pilot)
     theta_dim = len(theta_pilot)

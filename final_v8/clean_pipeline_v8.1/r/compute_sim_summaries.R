@@ -41,6 +41,9 @@ set.seed(seed)
 
 n.snp <- nrow(alt_counts)
 K <- length(group_order)
+if (n.snp == 0) {
+  stop("No SNPs found in simulated counts; cannot compute poolfstat summaries.")
+}
 
 ac_down <- matrix(NA_integer_, nrow = n.snp, ncol = K)
 colnames(ac_down) <- group_order
@@ -57,6 +60,15 @@ for (i in seq_len(K)) {
 
 ref_grouped <- ifelse(is.na(ac_down), NA_integer_, target_cov - ac_down)
 cov_grouped <- ifelse(is.na(ac_down), NA_integer_, target_cov)
+dimnames(ref_grouped) <- dimnames(ac_down)
+dimnames(cov_grouped) <- dimnames(ac_down)
+rownames(ref_grouped) <- paste0("snp", seq_len(n.snp))
+rownames(cov_grouped) <- rownames(ref_grouped)
+if (any(colSums(!is.na(ref_grouped)) == 0)) {
+  stop("One or more populations have no valid SNPs after downsampling.")
+}
+storage.mode(ref_grouped) <- "integer"
+storage.mode(cov_grouped) <- "integer"
 
 # 1D folded SFS per group
 half <- floor(target_cov / 2)
