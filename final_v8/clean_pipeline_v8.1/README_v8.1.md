@@ -4,6 +4,9 @@ This document describes the **current** pipeline (v8.1) shipped in
 `final_v8/clean_pipeline_v8.1`. It combines SLiM simulations, Pool-seq summary
 statistics, and neural posterior estimation using a **neural spline flow (NSF)**.
 
+> **Version note:** v8.1 enforces time ordering via **cumulative-gap
+> parameterization** in `transforms.py`, so no post-hoc filtering is required.
+> The v8.1 changelog documents the removal of the prior check; see
 > **Version note:** v8.1 disables a time-ordering check in post-processing that
 > produced false positives when using diagonal covariance models; see
 > `CHANGELOG_v8.1.md` for full context.
@@ -124,6 +127,8 @@ population can have its own timing/size/duration. See:
 
 - The NSF model includes standardized summary statistics and parameters; the
   scalers are stored inside the model checkpoint.
+- Time parameters are transformed using cumulative gaps, so ordering constraints
+  are enforced in the parameterization rather than by post-hoc filtering.
 - For large runs, consider the multi-node scripts:
   `scripts/run_production_multinode.sh` or
   `scripts/run_production_multinode_reuse.sh`.

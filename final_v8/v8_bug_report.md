@@ -7,6 +7,8 @@ The **current** pipeline in this repository (`clean_pipeline_v8.1`) trains a
 below remain relevant because they address **simulation filtering** and
 **parameter transformations** that apply regardless of the NPE architecture.
 
+In v8.1, **time ordering is enforced via cumulative-gap parameterization** in
+`transforms.py`, so the old post-hoc time-ordering check is no longer used. See
 In v8.1, the **time-ordering check was disabled** in post-processing to avoid
 false positives caused by diagonal covariance assumptions; see
 `clean_pipeline_v8.1/CHANGELOG_v8.1.md` for details.
