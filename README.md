@@ -12,6 +12,7 @@ spline flow (NSF) posterior estimator. The full, runnable pipeline lives under
 3. **Train NPE**: fit a neural spline flow to infer `p(θ | x)`.
 4. **Infer posterior**: sample posterior parameters (time ordering enforced via
    cumulative-gap parameterization).
+4. **Infer posterior**: sample posterior parameters for observed data.
 5. **Validate**: POD, SBC, and PPC checks.
 
 ## Where to Start
