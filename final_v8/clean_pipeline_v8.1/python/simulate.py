@@ -122,6 +122,11 @@ def main() -> None:
     group_order, _ = read_groups_csv(cfg["observed"]["groups_csv"])
 
     pop_order = cfg.get("simulation", {}).get("pop_order", ["p1", "p3", "p4", "p5", "p7", "p8"])
+    if len(group_order) != len(pop_order):
+        raise ValueError(
+            "groups_csv and simulation.pop_order must describe the same number of populations. "
+            f"groups_csv has {len(group_order)} groups, pop_order has {len(pop_order)} entries."
+        )
 
     # theta keys: only FREE (non-fixed) parameters — built dynamically from config
     theta_keys_t = build_theta_keys(cfg)

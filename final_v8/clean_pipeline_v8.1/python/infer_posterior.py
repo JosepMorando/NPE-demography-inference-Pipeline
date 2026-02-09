@@ -97,13 +97,25 @@ def _invert_scaler(x: np.ndarray, scaler: Optional[Dict[str, np.ndarray]]) -> np
     return x * scaler["std"] + scaler["mean"]
 
 
-def _load_x_obs(path: str) -> np.ndarray:
+def _load_obs(path: str) -> tuple[np.ndarray, Optional[List[str]], Optional[str]]:
     obs = np.load(path, allow_pickle=True)
     if "x" in obs:
-        return obs["x"].astype(np.float32)
-    if "x_obs" in obs:
-        return obs["x_obs"].astype(np.float32)
-    raise KeyError(f"Observed NPZ must contain 'x' or 'x_obs'. Keys found: {list(obs.keys())}")
+        x_obs = obs["x"].astype(np.float32)
+    elif "x_obs" in obs:
+        x_obs = obs["x_obs"].astype(np.float32)
+    else:
+        raise KeyError(f"Observed NPZ must contain 'x' or 'x_obs'. Keys found: {list(obs.keys())}")
+
+    order_key = None
+    order = None
+    if "pop_order" in obs:
+        order_key = "pop_order"
+        order = [str(x) for x in obs["pop_order"].tolist()]
+    elif "group_order" in obs:
+        order_key = "group_order"
+        order = [str(x) for x in obs["group_order"].tolist()]
+
+    return x_obs, order, order_key
 
 
 def _infer_param_names(ckpt: dict) -> List[str]:
@@ -138,11 +150,27 @@ def main() -> None:
     theta_scaler = ckpt.get("theta_scaler")
     param_names = _infer_param_names(ckpt)
 
-    x_obs = _load_x_obs(args.obs)
+    ckpt_pop_order = ckpt.get("pop_order")
+    if ckpt_pop_order is not None:
+        ckpt_pop_order = [str(x) for x in ckpt_pop_order]
+
+    x_obs, obs_order, obs_order_key = _load_obs(args.obs)
     if x_obs.ndim != 1:
         x_obs = x_obs.reshape(-1).astype(np.float32)
     if x_obs.shape[0] != x_dim:
         raise ValueError(f"Observed summary length {x_obs.shape[0]} != model x_dim {x_dim}.")
+    if obs_order is not None and ckpt_pop_order is not None:
+        if len(obs_order) != len(ckpt_pop_order):
+            raise ValueError(
+                "Observed population order length does not match model pop_order length. "
+                f"Observed ({obs_order_key}) has {len(obs_order)} entries, "
+                f"model pop_order has {len(ckpt_pop_order)}."
+            )
+        if obs_order != ckpt_pop_order:
+            print("WARNING: Observed population order labels differ from model pop_order.")
+            print(f"  Observed ({obs_order_key}): {obs_order}")
+            print(f"  Model pop_order: {ckpt_pop_order}")
+            print("  Ensure the ordering matches before trusting posterior results.")
 
     x_obs_scaled = _apply_scaler(x_obs, x_scaler)
     x_t = torch.from_numpy(x_obs_scaled).unsqueeze(0).to(device)
