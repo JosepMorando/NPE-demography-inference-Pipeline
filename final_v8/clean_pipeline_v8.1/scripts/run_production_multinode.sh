@@ -91,6 +91,7 @@ echo ""
 
 PARTS=()
 PIDS=()
+SEED_CURSOR=0
 
 for i in "${!NODES[@]}"; do
   node="${NODES[$i]}"
@@ -103,7 +104,10 @@ for i in "${!NODES[@]}"; do
   part_out="simulations/sim_part$((i+1)).npz"
   PARTS+=("$part_out")
 
-  echo "[${node}] launching: n=${n_chunk}, workers=${WORKERS_PER_NODE}, out=${part_out}"
+  NODE_SEED_OFFSET="$SEED_CURSOR"
+  SEED_CURSOR=$(( SEED_CURSOR + n_chunk ))
+
+  echo "[${node}] launching: n=${n_chunk}, workers=${WORKERS_PER_NODE}, out=${part_out}, seed_offset=${NODE_SEED_OFFSET}"
 
   # Launch simulation chunk on each node. Assumes shared filesystem for PROJECT_ROOT.
   ssh "$node" "cd '$PROJECT_ROOT' && \
@@ -113,7 +117,7 @@ for i in "${!NODES[@]}"; do
       --config '$CONFIG' \
       --n '$n_chunk' \
       --out '$part_out' \
-      --seed-offset 0 \
+      --seed-offset '$NODE_SEED_OFFSET' \
       --workers '$WORKERS_PER_NODE'" &
 
   PIDS+=("$!")
