@@ -13,7 +13,7 @@ Transformations:
 """
 from __future__ import annotations
 
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, Tuple, Optional
 import numpy as np
 
 TIME_GAP_DEPENDENCIES = {
@@ -50,7 +50,11 @@ def _get_time_gap_parent(key: str, available: set[str]) -> str | None:
 EPS = 1e-8
 
 
-def transform_to_unconstrained(params: Dict[str, Any], theta_keys: Tuple[str, ...]) -> Dict[str, float]:
+def transform_to_unconstrained(
+    params: Dict[str, Any],
+    theta_keys: Tuple[str, ...],
+    size_anchors: Optional[Dict[str, float]] = None,
+) -> Dict[str, float]:
     """Transform biological parameters to unconstrained space.
     
     This transformation ensures the NSF learns in a space where:
@@ -82,7 +86,13 @@ def transform_to_unconstrained(params: Dict[str, Any], theta_keys: Tuple[str, ..
         if key.startswith('N_'):
             if value <= 0:
                 raise ValueError(f"{key}={value} must be positive for log transform")
-            unconstrained[key] = np.log(value)
+            anchor = None if size_anchors is None else size_anchors.get(key)
+            if anchor is None:
+                unconstrained[key] = np.log(value)
+            else:
+                if anchor <= 0:
+                    raise ValueError(f"Anchor for {key} must be positive, got {anchor}")
+                unconstrained[key] = np.log(value / anchor)
         
         # Times: cumulative gap parameterization (must respect ordering)
         elif key.startswith('T_'):
@@ -117,8 +127,11 @@ def transform_to_unconstrained(params: Dict[str, Any], theta_keys: Tuple[str, ..
     return unconstrained
 
 
-def inverse_transform_from_unconstrained(unconstrained: Dict[str, float],
-                                        theta_keys: Tuple[str, ...]) -> Dict[str, float]:
+def inverse_transform_from_unconstrained(
+    unconstrained: Dict[str, float],
+    theta_keys: Tuple[str, ...],
+    size_anchors: Optional[Dict[str, float]] = None,
+) -> Dict[str, float]:
     """Transform unconstrained parameters back to biological space.
     
     Parameters
@@ -157,7 +170,13 @@ def inverse_transform_from_unconstrained(unconstrained: Dict[str, float],
         
         # Population sizes: exp transform
         if key.startswith('N_'):
-            biological[key] = _safe_exp(value)
+            anchor = None if size_anchors is None else size_anchors.get(key)
+            if anchor is None:
+                biological[key] = _safe_exp(value)
+            else:
+                if anchor <= 0:
+                    raise ValueError(f"Anchor for {key} must be positive, got {anchor}")
+                biological[key] = anchor * _safe_exp(value)
         
         # Times: exp transform (gap space)
         elif key.startswith('T_'):
@@ -189,7 +208,11 @@ def inverse_transform_from_unconstrained(unconstrained: Dict[str, float],
     return biological
 
 
-def transform_theta_vector(theta: np.ndarray, theta_keys: Tuple[str, ...]) -> np.ndarray:
+def transform_theta_vector(
+    theta: np.ndarray,
+    theta_keys: Tuple[str, ...],
+    size_anchors: Optional[Dict[str, float]] = None,
+) -> np.ndarray:
     """Transform a theta vector (or batch of vectors) to unconstrained space.
     
     Parameters
@@ -207,7 +230,7 @@ def transform_theta_vector(theta: np.ndarray, theta_keys: Tuple[str, ...]) -> np
     if theta.ndim == 1:
         # Single vector
         params_dict = {k: theta[i] for i, k in enumerate(theta_keys)}
-        unconstrained = transform_to_unconstrained(params_dict, theta_keys)
+        unconstrained = transform_to_unconstrained(params_dict, theta_keys, size_anchors=size_anchors)
         return np.array([unconstrained[k] for k in theta_keys], dtype=np.float32)
     
     elif theta.ndim == 2:
@@ -216,7 +239,7 @@ def transform_theta_vector(theta: np.ndarray, theta_keys: Tuple[str, ...]) -> np
         result = np.zeros_like(theta)
         for i in range(n_samples):
             params_dict = {k: theta[i, j] for j, k in enumerate(theta_keys)}
-            unconstrained = transform_to_unconstrained(params_dict, theta_keys)
+            unconstrained = transform_to_unconstrained(params_dict, theta_keys, size_anchors=size_anchors)
             result[i] = np.array([unconstrained[k] for k in theta_keys], dtype=np.float32)
         return result
     
@@ -224,8 +247,11 @@ def transform_theta_vector(theta: np.ndarray, theta_keys: Tuple[str, ...]) -> np
         raise ValueError(f"theta must be 1D or 2D, got shape {theta.shape}")
 
 
-def inverse_transform_theta_vector(theta_unconstrained: np.ndarray, 
-                                   theta_keys: Tuple[str, ...]) -> np.ndarray:
+def inverse_transform_theta_vector(
+    theta_unconstrained: np.ndarray,
+    theta_keys: Tuple[str, ...],
+    size_anchors: Optional[Dict[str, float]] = None,
+) -> np.ndarray:
     """Transform theta vector(s) from unconstrained back to biological space.
     
     Parameters
@@ -243,7 +269,11 @@ def inverse_transform_theta_vector(theta_unconstrained: np.ndarray,
     if theta_unconstrained.ndim == 1:
         # Single vector
         unconstrained_dict = {k: float(theta_unconstrained[i]) for i, k in enumerate(theta_keys)}
-        biological = inverse_transform_from_unconstrained(unconstrained_dict, theta_keys)
+        biological = inverse_transform_from_unconstrained(
+            unconstrained_dict,
+            theta_keys,
+            size_anchors=size_anchors,
+        )
         # Keep float64 here for numerical safety; callers can cast later.
         return np.array([biological[k] for k in theta_keys], dtype=np.float64)
     
@@ -254,7 +284,11 @@ def inverse_transform_theta_vector(theta_unconstrained: np.ndarray,
         result = np.zeros((n_samples, theta_unconstrained.shape[1]), dtype=np.float64)
         for i in range(n_samples):
             unconstrained_dict = {k: float(theta_unconstrained[i, j]) for j, k in enumerate(theta_keys)}
-            biological = inverse_transform_from_unconstrained(unconstrained_dict, theta_keys)
+            biological = inverse_transform_from_unconstrained(
+                unconstrained_dict,
+                theta_keys,
+                size_anchors=size_anchors,
+            )
             result[i] = np.array([biological[k] for k in theta_keys], dtype=np.float64)
         return result
     

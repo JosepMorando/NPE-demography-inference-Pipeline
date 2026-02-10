@@ -14,6 +14,7 @@ from npe_demography.priors import get_fixed_value, is_fixed
 from npe_demography.slim import render_slim_script, run_slim
 from npe_demography.summaries import compute_summaries_from_trees
 from npe_demography.transforms import inverse_transform_theta_vector
+from npe_demography.priors import build_size_anchors
 
 
 def build_argparser() -> argparse.ArgumentParser:
@@ -86,6 +87,7 @@ def main() -> None:
     x_scaler = ckpt.get("x_scaler")
     theta_scaler = ckpt.get("theta_scaler")
     theta_keys = tuple(str(x) for x in ckpt.get("theta_keys", []))
+    size_anchors = build_size_anchors(cfg, theta_keys)
     if not theta_keys:
         raise ValueError("Checkpoint missing theta_keys; cannot run PPC.")
 
@@ -144,7 +146,7 @@ def main() -> None:
         theta_post = model.sample(args.n_ppc, x_t).cpu().numpy().astype(np.float32)
 
     theta_post = _invert_scaler(theta_post, theta_scaler)
-    theta_post = inverse_transform_theta_vector(theta_post, theta_keys)
+    theta_post = inverse_transform_theta_vector(theta_post, theta_keys, size_anchors=size_anchors)
 
     tmpdir = str(cfg["simulation"].get("trees_tmpdir", "/dev/shm"))
     ensure_dir(tmpdir)

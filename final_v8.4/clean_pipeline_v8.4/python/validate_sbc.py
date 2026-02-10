@@ -8,13 +8,16 @@ import numpy as np
 import torch
 
 from npe_demography.nsf import FlowConfig, NeuralSplineFlow
+from npe_demography.config import load_config
 from npe_demography.transforms import inverse_transform_theta_vector
+from npe_demography.priors import build_size_anchors
 
 
 def build_argparser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Simulation-Based Calibration using trained NSF model.")
     p.add_argument("--model", required=True, help="Trained NSF model checkpoint")
     p.add_argument("--simulations", required=True, help="Simulation dataset (.npz)")
+    p.add_argument("--config", required=True, help="Config YAML (for size anchors)")
     p.add_argument("--out", default="results/sbc_results.npz", help="Output .npz path")
     p.add_argument("--n-sbc", type=int, default=200, help="Number of SBC draws")
     p.add_argument("--n-post", type=int, default=2000, help="Posterior samples per SBC draw")
@@ -67,6 +70,7 @@ def main() -> None:
     X = data["X"].astype(np.float32)
     Theta = data["Theta"].astype(np.float32)
     theta_keys = tuple(str(x) for x in data["theta_keys"].tolist())
+    size_anchors = build_size_anchors(load_config(args.config), theta_keys)
     if not theta_keys:
         raise ValueError("Simulation dataset missing theta_keys; cannot run SBC.")
 
@@ -93,8 +97,8 @@ def main() -> None:
         theta_post = _invert_scaler(theta_post, theta_scaler)
         theta_true_unscaled = theta_true
 
-        theta_post_bio = inverse_transform_theta_vector(theta_post, theta_keys)
-        theta_true_bio = inverse_transform_theta_vector(theta_true_unscaled, theta_keys)
+        theta_post_bio = inverse_transform_theta_vector(theta_post, theta_keys, size_anchors=size_anchors)
+        theta_true_bio = inverse_transform_theta_vector(theta_true_unscaled, theta_keys, size_anchors=size_anchors)
 
         ranks[i] = np.sum(theta_post_bio < theta_true_bio, axis=0)
 
