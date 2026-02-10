@@ -62,6 +62,7 @@ echo ""
 echo "Step 6/7: Running SBC validation..."
 echo "----------------------------------------------------------------------"
 python3 python/validate_sbc.py \
+  --config "$CONFIG" \
   --model "$POD_DIR/models/nsf_model.pt" \
   --simulations "$POD_DIR/simulations/sim_data.npz" \
   --out "$POD_DIR/results/sbc_results.npz"

@@ -90,6 +90,29 @@ p_mat <- ac_down / target_cov
 het_mat <- 2 * p_mat * (1 - p_mat)
 het <- colMeans(het_mat, na.rm = TRUE)
 
+# Additional Ne-sensitive summaries
+# Watterson-like proxy: proportion of segregating sites
+seg_prop <- colMeans((ac_down > 0) & (ac_down < target_cov), na.rm = TRUE)
+# Tajima-like proxy: pi - theta_W_proxy
+tajima_proxy <- het - seg_prop
+# Singleton / low-frequency proxy (folded count == 1)
+singleton_prop <- sapply(seq_len(K), function(i) {
+  ac <- ac_down[, i]
+  ac <- ac[!is.na(ac)]
+  if (length(ac) == 0) return(NA_real_)
+  folded <- pmin(ac, target_cov - ac)
+  mean(folded == 1)
+})
+
+# Windowed variance of pi (mean across groups)
+n_windows <- min(20L, max(5L, floor(n.snp / 50L)))
+window_id <- cut(seq_len(n.snp), breaks = n_windows, labels = FALSE)
+pi_var_by_group <- sapply(seq_len(K), function(i) {
+  vals <- tapply(het_mat[, i], window_id, function(v) mean(v, na.rm = TRUE))
+  stats::var(as.numeric(vals), na.rm = TRUE)
+})
+pi_var_mean <- mean(pi_var_by_group, na.rm = TRUE)
+
 # Build poolfstat object
 pd_g <- methods::new("pooldata")
 slot_names <- methods::slotNames(pd_g)
@@ -146,7 +169,32 @@ upper_flat <- function(M) {
 dxy_flat <- upper_flat(div)
 fst_flat <- upper_flat(fst)
 
-x_sim <- c(as.vector(t(sfs1d)), as.numeric(het), as.numeric(dxy_flat), as.numeric(fst_flat))
+# Windowed variance of pairwise Hudson-like FST proxy (mean across pairs)
+pair_vals <- c()
+for (a in 1:(K-1)) {
+  for (b in (a+1):K) {
+    pa <- p_mat[, a]
+    pb <- p_mat[, b]
+    num <- (pa - pb)^2
+    den <- pa * (1 - pb) + pb * (1 - pa)
+    fst_site <- ifelse(den > 0, num / den, NA_real_)
+    fst_w <- tapply(fst_site, window_id, function(v) mean(v, na.rm = TRUE))
+    pair_vals <- c(pair_vals, stats::var(as.numeric(fst_w), na.rm = TRUE))
+  }
+}
+fst_var_mean <- mean(pair_vals, na.rm = TRUE)
+
+x_sim <- c(
+  as.vector(t(sfs1d)),
+  as.numeric(het),
+  as.numeric(seg_prop),
+  as.numeric(tajima_proxy),
+  as.numeric(singleton_prop),
+  as.numeric(dxy_flat),
+  as.numeric(fst_flat),
+  as.numeric(pi_var_mean),
+  as.numeric(fst_var_mean)
+)
 
 np$savez_compressed(
   file.path(out_dir, "sim_summaries.npz"),

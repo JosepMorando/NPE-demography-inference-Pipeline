@@ -12,6 +12,7 @@ import torch
 from npe_demography.config import load_config
 from npe_demography.nsf import FlowConfig, NeuralSplineFlow
 from npe_demography.transforms import inverse_transform_theta_vector
+from npe_demography.priors import build_size_anchors
 
 
 def _check_time_ordering(theta: np.ndarray, param_names: List[str]) -> np.ndarray:
@@ -71,89 +72,6 @@ def _check_time_ordering(theta: np.ndarray, param_names: List[str]) -> np.ndarra
     return valid
 
 
-def _extract_prior_bounds(cfg: Dict[str, object], param_names: List[str]) -> Dict[str, Tuple[float, float]]:
-    priors = cfg.get("priors")
-    if not isinstance(priors, dict):
-        raise ValueError("Config missing 'priors' mapping.")
-
-    times_cfg = priors.get("times", {})
-    sizes_cfg = priors.get("sizes", {})
-    if not isinstance(times_cfg, dict) or not isinstance(sizes_cfg, dict):
-        raise ValueError("Config priors.times and priors.sizes must be mappings.")
-
-    bounds: Dict[str, Tuple[float, float]] = {}
-    for name in param_names:
-        if name in times_cfg:
-            t_cfg = times_cfg[name]
-            bounds[name] = (float(t_cfg["min"]), float(t_cfg["max"]))
-        elif name in sizes_cfg:
-            s_cfg = sizes_cfg[name]
-            if str(s_cfg.get("dist", "")).lower() == "fixed":
-                continue
-            if "min" in s_cfg and "max" in s_cfg:
-                bounds[name] = (float(s_cfg["min"]), float(s_cfg["max"]))
-
-    extras = priors.get("demography_extras", {})
-    if isinstance(extras, dict) and bool(extras.get("enable", False)):
-        bn = extras.get("bottleneck", {})
-        if isinstance(bn, dict):
-            bn_mode = str(bn.get("mode", "shared")).lower()
-            time_frac = bn.get("time_fraction", {})
-            size_frac = bn.get("size_fraction", {})
-            dur_cfg = bn.get("duration_gens", {})
-            if bn_mode == "shared":
-                if "BN_TIME_FRAC" in param_names:
-                    bounds["BN_TIME_FRAC"] = (float(time_frac["min"]), float(time_frac["max"]))
-                if "BN_SIZE_FRAC" in param_names:
-                    bounds["BN_SIZE_FRAC"] = (float(size_frac["min"]), float(size_frac["max"]))
-                if "BN_DUR" in param_names:
-                    bounds["BN_DUR"] = (float(dur_cfg["min"]), float(dur_cfg["max"]))
-            elif bn_mode == "per_population":
-                pops = ["BG01", "SOUTH_LOW", "SOUTH_MID", "EAST", "CENTRAL", "PYRENEES"]
-                for pop in pops:
-                    time_key = f"BN_TIME_FRAC_{pop}"
-                    size_key = f"BN_SIZE_FRAC_{pop}"
-                    dur_key = f"BN_DUR_{pop}"
-                    if time_key in param_names:
-                        bounds[time_key] = (float(time_frac["min"]), float(time_frac["max"]))
-                    if size_key in param_names:
-                        bounds[size_key] = (float(size_frac["min"]), float(size_frac["max"]))
-                    if dur_key in param_names:
-                        bounds[dur_key] = (float(dur_cfg["min"]), float(dur_cfg["max"]))
-
-        ex = extras.get("expansion", {})
-        if isinstance(ex, dict) and bool(ex.get("enable", True)):
-            start_cfg = ex.get("start_fraction", {})
-            rate_cfg = ex.get("rate", {})
-            if "EXP_START_FRAC" in param_names:
-                bounds["EXP_START_FRAC"] = (float(start_cfg["min"]), float(start_cfg["max"]))
-            if "EXP_RATE" in param_names:
-                bounds["EXP_RATE"] = (float(rate_cfg["min"]), float(rate_cfg["max"]))
-
-        mig = extras.get("migration", {})
-        if isinstance(mig, dict) and bool(mig.get("enable", False)):
-            m_cfg = mig.get("m", {})
-            start_cfg = mig.get("start_fraction", {})
-            if "MIG_M" in param_names:
-                bounds["MIG_M"] = (float(m_cfg["min"]), float(m_cfg["max"]))
-            if "MIG_START_FRAC" in param_names:
-                bounds["MIG_START_FRAC"] = (float(start_cfg["min"]), float(start_cfg["max"]))
-    return bounds
-
-
-def _mask_with_bounds(
-    theta: np.ndarray,
-    param_names: List[str],
-    bounds: Dict[str, Tuple[float, float]],
-) -> np.ndarray:
-    n_samples = theta.shape[0]
-    mask = np.ones(n_samples, dtype=bool)
-    for i, name in enumerate(param_names):
-        if name not in bounds:
-            continue
-        min_val, max_val = bounds[name]
-        mask &= (theta[:, i] >= min_val) & (theta[:, i] <= max_val)
-    return mask
 
 
 def build_argparser() -> argparse.ArgumentParser:
@@ -166,7 +84,7 @@ def build_argparser() -> argparse.ArgumentParser:
     p.add_argument(
         "--config",
         required=True,
-        help="YAML config file for enforcing prior bounds during inference.",
+        help="YAML config file used for size-anchor metadata during inference.",
     )
     p.add_argument("--out", default="results/posterior_samples.npz",
                     help="Output posterior samples (.npz)")
@@ -283,55 +201,28 @@ def main() -> None:
     print(f"Sampling {n_samples:,} posterior samples...")
 
     cfg = load_config(args.config)
-    bounds = _extract_prior_bounds(cfg, param_names)
-    if not bounds:
-        raise ValueError(
-            f"No matching prior bounds found in {args.config}; "
-            "ensure priors.times and priors.sizes match the trained parameter names."
-        )
-    print(f"Applying prior bounds from {args.config}")
+    size_anchors = build_size_anchors(cfg, tuple(param_names))
+    if size_anchors:
+        print("Using Ne log-ratio anchors for inverse transform (anchor: fixed N_CORE).")
 
-    accepted: List[np.ndarray] = []
-    total_draws = 0
-    remaining = n_samples
-    max_draws = max(n_samples * 200, 200000)
-    while remaining > 0:
-        if total_draws >= max_draws:
-            raise RuntimeError(
-                "Failed to collect enough posterior samples within prior bounds. "
-                "Consider increasing n or widening prior ranges."
-            )
-        batch_size = max(1000, remaining)
-        total_draws += batch_size
+    # Draw exactly n_samples and decode from unconstrained space.
+    # We intentionally avoid posterior truncation by prior bounds.
+    with torch.no_grad():
+        theta_post_t = model.sample(n_samples, x_t)
 
-        # Use vectorised NSF sampling (much faster than the per-sample for-loop)
-        with torch.no_grad():
-            theta_post_t = model.sample(batch_size, x_t)  # (n, theta_dim)
+    theta_post = theta_post_t.cpu().numpy().astype(np.float32)
 
-        theta_post = theta_post_t.cpu().numpy().astype(np.float32)
+    # De-standardize from training space
+    theta_post = _invert_scaler(theta_post, theta_scaler)
 
-        # De-standardize from training space
-        theta_post = _invert_scaler(theta_post, theta_scaler)
+    # Transform from unconstrained to biological space
+    theta_post = inverse_transform_theta_vector(theta_post, param_names, size_anchors=size_anchors)
 
-        # Transform from unconstrained to biological space
-        theta_post = inverse_transform_theta_vector(theta_post, param_names)
-
-        # Time ordering is enforced by cumulative-gap parameterization in transforms.
-
-        mask = _mask_with_bounds(theta_post, param_names, bounds)
-        mask &= _check_time_ordering(theta_post, param_names)
+    # Time ordering is enforced by cumulative-gap parameterization in transforms.
+    mask = _check_time_ordering(theta_post, param_names)
+    if (~mask).any():
+        print(f"WARNING: {(~mask).sum()} samples failed time-order checks and were removed.")
         theta_post = theta_post[mask]
-
-        if theta_post.size == 0:
-            continue
-
-        accepted.append(theta_post)
-        remaining = n_samples - sum(chunk.shape[0] for chunk in accepted)
-
-    theta_post = np.concatenate(accepted, axis=0)[:n_samples]
-    if total_draws > 0:
-        acceptance = theta_post.shape[0] / total_draws
-        print(f"Accepted {theta_post.shape[0]:,} / {total_draws:,} samples ({acceptance:.2%}).")
 
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)

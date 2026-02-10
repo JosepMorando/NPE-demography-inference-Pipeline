@@ -25,7 +25,7 @@ import numpy as np
 
 from npe_demography.config import load_config, ensure_dir
 from npe_demography.io import read_groups_csv
-from npe_demography.priors import sample_from_prior, theta_vector, build_theta_keys
+from npe_demography.priors import sample_from_prior, theta_vector, build_theta_keys, build_size_anchors
 from npe_demography.slim import render_slim_script, run_slim
 from npe_demography.summaries import compute_summaries_from_trees
 from npe_demography.transforms import transform_theta_vector
@@ -48,7 +48,7 @@ def build_argparser() -> argparse.ArgumentParser:
 
 
 def _one_sim(storage_idx: int, seed_idx: int, cfg: Dict[str, Any], pop_order: List[str],
-             theta_keys: Tuple[str, ...], base_seed: int, tmpdir: str,
+             theta_keys: Tuple[str, ...], size_anchors: Dict[str, float], base_seed: int, tmpdir: str,
              timeout: float | None) -> Tuple[int, np.ndarray, np.ndarray, Dict[str, Any]]:
     """Run one simulation: sample params -> scale -> SLiM -> overlay mutations -> summaries."""
     rng = np.random.default_rng(base_seed + seed_idx * 9973)
@@ -86,7 +86,7 @@ def _one_sim(storage_idx: int, seed_idx: int, cfg: Dict[str, Any], pop_order: Li
     # theta vector: biological parameters in UNCONSTRAINED space
     # This allows the NSF to learn without constraint violations
     theta_bio = theta_vector(params, theta_keys)
-    theta = transform_theta_vector(theta_bio, theta_keys)
+    theta = transform_theta_vector(theta_bio, theta_keys, size_anchors=size_anchors)
 
     # Cleanup temp files
     try:
@@ -136,6 +136,8 @@ def main() -> None:
     # theta keys: only FREE (non-fixed) parameters — built dynamically from config
     theta_keys_t = build_theta_keys(cfg)
 
+    size_anchors = build_size_anchors(cfg, theta_keys_t)
+
     n_sims = int(args.n if args.n is not None else cfg["npe"]["n_sims"])
     workers = int(args.workers if args.workers is not None else cfg["npe"]["num_workers"])
 
@@ -168,6 +170,7 @@ def main() -> None:
                 cfg,
                 pop_order,
                 theta_keys_t,
+                size_anchors,
                 base_seed,
                 tmpdir,
                 args.timeout,
@@ -218,7 +221,7 @@ def main() -> None:
 
     with ProcessPoolExecutor(max_workers=workers) as ex:
         futs = [
-            ex.submit(_one_sim, i, seed_offset + i, cfg, pop_order, theta_keys_t, base_seed, tmpdir, args.timeout)
+            ex.submit(_one_sim, i, seed_offset + i, cfg, pop_order, theta_keys_t, size_anchors, base_seed, tmpdir, args.timeout)
             for i in range(1, n_sims)
         ]
 

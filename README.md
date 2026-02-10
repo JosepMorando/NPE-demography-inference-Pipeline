@@ -1,43 +1,44 @@
-# NPE Demography Inference Pipeline (v8.1)
+# NPE Demography Inference Pipeline (v8.4)
 
-This repository contains the **current** (v8.1) NPE pipeline for demographic
-inference in *Fagus* using SLiM simulations, summary statistics, and a neural
-spline flow (NSF) posterior estimator. The full, runnable pipeline lives under
-`final_v8/clean_pipeline_v8.1`.
+This repository tracks the **current v8.4 pipeline** for demographic inference
+in *Fagus* using:
 
-## Pipeline at a Glance
+- SLiM simulations
+- R-based Pool-seq summary statistics
+- Neural posterior estimation (NSF)
+- POD/SBC/PPC validation
 
-1. **Observed summaries**: compute Pool-seq summary statistics in R.
-2. **Simulations**: run SLiM simulations and compute matching summaries.
-3. **Train NPE**: fit a neural spline flow to infer `p(θ | x)`.
-4. **Infer posterior**: sample posterior parameters (time ordering enforced via
-   cumulative-gap parameterization).
-5. **Validate**: POD, SBC, and PPC checks.
+The active pipeline is located at:
 
-## Where to Start
+- `final_v8.4/clean_pipeline_v8.4`
 
-- **Pipeline overview & usage:** `final_v8/clean_pipeline_v8.1/README_v8.1.md`
-- **Installation:** `final_v8/clean_pipeline_v8.1/docs/INSTALL.md`
-- **Version history:** `final_v8/clean_pipeline_v8.1/CHANGELOG_v8.1.md`
-
-## Quick Commands
+## Quick start
 
 ```bash
-# POD validation (recommended first)
-cd final_v8/clean_pipeline_v8.1
+cd final_v8.4/clean_pipeline_v8.4
+
+# 1) Validate setup and recovery first
 bash scripts/run_pod_test.sh
 
-# Production run (after POD passes)
+# 2) Run production workflow
 bash scripts/run_production.sh
 ```
 
-## Repository Layout
+## Documentation
 
-```
-final_v8/clean_pipeline_v8.1/
-  config/        # configs for production + POD
-  python/        # simulation, training, inference, validation
-  r/             # observed summary stats (Pool-seq)
-  scripts/       # orchestration scripts
-  docs/          # install + pipeline docs
+- Pipeline usage: `final_v8.4/clean_pipeline_v8.4/README.md`
+- Installation: `final_v8.4/clean_pipeline_v8.4/docs/INSTALL.md`
+- Version notes: `final_v8.4/clean_pipeline_v8.4/CHANGELOG_v8.4.md`
+- Development roadmap: `final_v8.4/clean_pipeline_v8.4/docs/ROADMAP.md`
+
+## Repository layout
+
+```text
+final_v8.4/
+  clean_pipeline_v8.4/
+    config/      # production + POD configs
+    python/      # simulation, training, inference, validation
+    r/           # observed summary statistic generation
+    scripts/     # orchestration scripts
+    docs/        # install + roadmap docs
 ```

@@ -213,3 +213,25 @@ def build_theta_keys(cfg: Dict[str, Any]) -> Tuple[str, ...]:
 
 def theta_vector(param_dict: Dict[str, Any], theta_keys: Tuple[str, ...]) -> np.ndarray:
     return np.array([float(param_dict[k]) for k in theta_keys], dtype=np.float32)
+
+
+def build_size_anchors(cfg: Dict[str, Any], theta_keys: Tuple[str, ...]) -> Dict[str, float]:
+    """Build Ne anchors for ratio parameterization in transformed space.
+
+    For each free size parameter `N_*`, use fixed `N_CORE` as anchor when
+    available; otherwise no anchor is applied for that key.
+    """
+    anchors: Dict[str, float] = {}
+    sizes = cfg.get("priors", {}).get("sizes", {})
+    anchor = None
+    core_cfg = sizes.get("N_CORE") if isinstance(sizes, dict) else None
+    if isinstance(core_cfg, dict) and is_fixed(core_cfg):
+        anchor = float(get_fixed_value(core_cfg))
+
+    if anchor is None:
+        return anchors
+
+    for key in theta_keys:
+        if key.startswith("N_"):
+            anchors[key] = anchor
+    return anchors
