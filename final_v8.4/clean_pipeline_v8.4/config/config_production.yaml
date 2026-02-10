@@ -1,0 +1,104 @@
+project:
+  name: "fagus_npe_production_v7"
+  seed: 42
+  output_dir: "production_results"
+
+observed:
+  pooldata_rdata: "observed_data/Pooldata_demography.RData"
+  pooldata_object: "filt.pooldata"
+  groups_csv: "config/groups_6clusters.csv"
+  target_cov: 20
+
+simulation:
+  slim_binary: "/home/j_morando/.local/bin/slim"
+  slim_template: "templates/model.slim.tpl"
+  trees_tmpdir: "/dev/shm"
+  
+  pop_order: ['p1', 'p3', 'p4', 'p5', 'p7', 'p8']
+  
+  # ---- Adaptive scaling ----
+  max_scale_factor: 200
+  safe_min_diploids: 50
+
+  burnin: 200
+  gens: 2000
+  genome_length: 5e6
+  recombination_rate: 1e-8
+  
+  mutation_overlay:
+    enable: true
+    mu: 7.77e-9
+    model: "binary"
+    target_snps: null
+  
+  samples_per_group_haploid: 20
+
+priors:
+  times:
+    T_BG01:      {min:  100, max: 1800}
+    T_CORE:      {min:  200, max: 1850}
+    T_SOUTH_LOW: {min:  300, max: 1900}
+    T_SOUTH_MID: {min:  500, max: 1950}
+    T_EAST:      {min:  400, max: 1950}
+    T_INT:       {min:  500, max: 1950}
+    T_CENTRAL:   {min:  600, max: 1970}
+    T_PYRENEES:  {min:  700, max: 1990}
+  
+  sizes:
+    # FIXED: Ghost/ancestral populations
+    N0:          {dist: fixed, value: 50000}
+    N_CORE:      {dist: fixed, value: 20000}
+    
+    # FREE: Sampled populations + N_INT
+    N_BG01:      {dist: loguniform, min:  2500, max: 150000}
+    N_SOUTH_LOW: {dist: loguniform, min:  2500, max: 150000}
+    N_SOUTH_MID: {dist: loguniform, min:  2500, max: 150000}
+    N_EAST:      {dist: loguniform, min:  2500, max: 150000}
+    N_INT:       {dist: loguniform, min:  2500, max: 150000}
+    N_CENTRAL:   {dist: loguniform, min:  2500, max: 150000}
+    N_PYRENEES:  {dist: loguniform, min:  2500, max: 150000}
+  
+  demography_extras:
+    enable: false
+    bottleneck:
+      # NEW in v7: per_population mode allows independent bottlenecks
+      # Options: "shared" (v6 behavior) or "per_population" (v7)
+      mode: per_population
+      time_fraction: {dist: uniform, min: 0.2, max: 0.6}
+      size_fraction: {dist: loguniform, min: 0.05, max: 0.3}
+      duration_gens: {dist: discrete_uniform, min: 10, max: 100}
+    expansion:
+      enable: false
+    migration:
+      enable: false
+
+npe:
+  # ---- Simulation budget (main lever) ----
+  n_sims: 1000000          # 0.8–1.2M is the sweet spot overnight at ~100k/hour
+
+  # ---- Dataloader / training ----
+  batch_size: 1024         # increase for stability + speed; drop to 512 if GPU/VRAM limited
+  num_workers: 60          # per node; keep as-is (you already tuned this)
+
+  # ---- Model capacity ----
+  hidden_sizes: [512, 512] # bigger embedding net for x -> context
+  flow:
+    hidden_sizes: [512, 512]
+    num_layers: 10         # more layers helps in 15D with correlated posteriors
+    num_bins: 12           # more bins increases expressiveness
+    tail_bound: 4.0        # slightly wider; helps avoid tail truncation artifacts
+
+  # ---- Optimisation ----
+  lr: 0.0003               # slightly lower for larger batches + stability
+  weight_decay: 0.00002
+
+  # ---- Training schedule ----
+  max_epochs: 200
+  early_stop_patience: 30  # don’t stop too early on a large run
+
+  # ---- Normalisation ----
+  standardize_x: true
+  standardize_theta: true  # keep, but strongly consider log-transforming N before standardisation
+
+  # ---- Posterior sampling ----
+  n_posterior_samples: 20000  # 500 is too low for stable quantiles in 15D
