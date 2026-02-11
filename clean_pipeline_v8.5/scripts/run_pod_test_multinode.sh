@@ -10,11 +10,13 @@
 #
 # Environment variables:
 #   NODES="geu-master geu-worker1 geu-worker2"   (space-separated node names)
-#   WORKERS_PER_NODE=70                            (parallel workers per node)
+#   WORKERS_PER_NODE=70                           (parallel workers per node)
+#   ENABLE_SIM_COMPRESSION=0|1                    (default 0 for speed)
 #
 
 set -euo pipefail
 CONFIG="config/config_pod.yaml"
+
 # ---- Parse arguments ----
 REUSE_NPZ=""
 while [[ $# -gt 0 ]]; do
@@ -44,6 +46,7 @@ CONFIG="config/config_pod.yaml"
 POD_DIR="pod_test"
 WORKERS_PER_NODE="${WORKERS_PER_NODE:-60}"
 NODES_STR="${NODES:-geu-master geu-worker1 geu-worker2}"
+ENABLE_SIM_COMPRESSION="${ENABLE_SIM_COMPRESSION:-0}"
 read -r -a NODES <<< "$NODES_STR"
 
 # Threading safety
@@ -52,13 +55,14 @@ export MKL_NUM_THREADS="${MKL_NUM_THREADS:-1}"
 export OPENBLAS_NUM_THREADS="${OPENBLAS_NUM_THREADS:-1}"
 export NUMEXPR_NUM_THREADS="${NUMEXPR_NUM_THREADS:-1}"
 
-mkdir -p "$POD_DIR"/{simulations,models,results}
+mkdir -p "$POD_DIR"/{simulations,models,results,logs}
 
 PROJECT_ROOT="$(pwd)"
 
 echo "Config: $CONFIG"
 echo "Nodes: ${NODES[*]}"
 echo "Workers per node: $WORKERS_PER_NODE"
+echo "Simulation compression: $ENABLE_SIM_COMPRESSION (0 is fastest)"
 if [[ -n "$REUSE_NPZ" ]]; then
   echo "Reusing existing simulations: $REUSE_NPZ"
 fi
@@ -124,7 +128,16 @@ if [[ "$NEW_SIMS" -gt 0 ]]; then
 
   PARTS=()
   PIDS=()
+  LOGS=()
+  TAIL_PIDS=()
   SEED_CURSOR="$SEED_OFFSET"
+
+  cleanup_tails() {
+    for tpid in "${TAIL_PIDS[@]:-}"; do
+      kill "$tpid" 2>/dev/null || true
+    done
+  }
+  trap cleanup_tails EXIT
 
   for i in "${!NODES[@]}"; do
     node="${NODES[$i]}"
@@ -139,24 +152,39 @@ if [[ "$NEW_SIMS" -gt 0 ]]; then
 
     # Create unique temp directory for this node
     NODE_TMPDIR="/tmp/sim_scratch_${node}_$$"
+    NODE_LOCAL_OUT="${NODE_TMPDIR}/sim_part$((i+1)).npz"
 
     NODE_SEED_OFFSET="$SEED_CURSOR"
     SEED_CURSOR=$(( SEED_CURSOR + n_chunk ))
 
-    echo "[${node}] launching: n=${n_chunk}, workers=${WORKERS_PER_NODE}, out=${part_out}, seed_offset=${NODE_SEED_OFFSET}, tmpdir=${NODE_TMPDIR}"
+    log_file="$POD_DIR/logs/sim_${node}.log"
+    LOGS+=("$log_file")
+    : > "$log_file"
+
+    echo "[${node}] launching: n=${n_chunk}, workers=${WORKERS_PER_NODE}, seed_offset=${NODE_SEED_OFFSET}, tmpdir=${NODE_TMPDIR}"
+
+    tail -n 0 -F "$log_file" 2>/dev/null | sed -u "s/^/[${node}] /" &
+    TAIL_PIDS+=("$!")
+
+    COMPRESS_FLAG=""
+    if [[ "$ENABLE_SIM_COMPRESSION" == "1" ]]; then
+      COMPRESS_FLAG="--compress-output"
+    fi
 
     ssh "$node" "cd '$PROJECT_ROOT' && \
       mkdir -p '${NODE_TMPDIR}' && \
       export PYTHONPATH='$PROJECT_ROOT/python:\${PYTHONPATH:-}' && \
       export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 && \
-      python3 python/simulate.py \
+      python3 -u python/simulate.py \
         --config '$CONFIG' \
         --n '$n_chunk' \
-        --out '$part_out' \
+        --out '${NODE_LOCAL_OUT}' \
         --seed-offset '$NODE_SEED_OFFSET' \
         --workers '$WORKERS_PER_NODE' \
-        --tmpdir '${NODE_TMPDIR}' && \
-      rm -rf '${NODE_TMPDIR}'" &
+        --tmpdir '${NODE_TMPDIR}' \
+        ${COMPRESS_FLAG} && \
+      cp '${NODE_LOCAL_OUT}' '$part_out' && \
+      rm -rf '${NODE_TMPDIR}'" > "$log_file" 2>&1 &
 
     PIDS+=("$!")
   done
@@ -169,10 +197,13 @@ if [[ "$NEW_SIMS" -gt 0 ]]; then
     fi
   done
 
+  cleanup_tails
+  trap - EXIT
+
   if [[ "$FAIL" -ne 0 ]]; then
     echo ""
     echo "ERROR: One or more simulation chunks failed."
-    echo "Check per-node output above and partial files in $POD_DIR/simulations/."
+    echo "Check per-node output above and logs in $POD_DIR/logs/."
     exit 1
   fi
 
