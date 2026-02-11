@@ -1,0 +1,101 @@
+project:
+  name: "fagus_npe_pod_v8.5"
+  seed: 1234567
+  output_dir: "pod_test"
+
+observed:
+  pooldata_rdata: "observed_data/Pooldata_demography.RData"
+  pooldata_object: "filt.pooldata"
+  groups_csv: "config/groups_6clusters.csv"
+  target_cov: 20
+
+simulation:
+  slim_binary: "/home/j_morando/.local/bin/slim"
+  slim_template: "templates/model.slim.tpl"
+  trees_tmpdir: "/dev/shm"
+  
+  pop_order: ['p1', 'p3', 'p4', 'p5', 'p7', 'p8']
+  
+  # ---- Adaptive scaling ----
+  max_scale_factor: 10000
+  safe_min_diploids: 10
+
+  burnin: 2000
+  gens: 90000
+  genome_length: 5e6
+  recombination_rate: 1e-8
+  
+  mutation_overlay:
+    enable: true
+    mu: 7.77e-9
+    model: "binary"
+    target_snps: null
+  
+  samples_per_group_haploid: 20
+
+priors:
+  times:
+    T_BG01:      {min:  10, max: 89900}
+    T_CORE:      {min:  20, max: 89901}
+    T_SOUTH_LOW: {min:  30, max: 89902}
+    T_SOUTH_MID: {min:  30, max: 89902}
+    T_EAST:      {min:  40, max: 89903}
+    T_INT:       {min:  40, max: 89903}
+    T_CENTRAL:   {min:  50, max: 89904}
+    T_PYRENEES:  {min:  60, max: 89905}
+  
+  sizes:
+    # FIXED: Ghost/ancestral populations
+    N0:          {dist: fixed, value: 100000}
+    N_CORE:      {dist: fixed, value: 100000}
+    
+    # FREE: Sampled populations + N_INT
+    N_BG01:      {dist: loguniform, min:  1200, max: 750000}
+    N_SOUTH_LOW: {dist: loguniform, min:  1200, max: 750000}
+    N_SOUTH_MID: {dist: loguniform, min:  1200, max: 750000}
+    N_EAST:      {dist: loguniform, min:  1200, max: 750000}
+    N_INT:       {dist: loguniform, min:  1200, max: 750000}
+    N_CENTRAL:   {dist: loguniform, min:  1200, max: 750000}
+    N_PYRENEES:  {dist: loguniform, min:  1200, max: 750000}
+  
+  demography_extras:
+    enable: false
+    bottleneck:
+      # v7: per_population mode for independent bottlenecks
+      mode: per_population
+      time_fraction: {dist: uniform, min: 0.2, max: 0.6}
+      size_fraction: {dist: loguniform, min: 0.05, max: 0.3}
+      duration_gens: {dist: discrete_uniform, min: 10, max: 100}
+    expansion:
+      enable: false
+    migration:
+      enable: false
+
+npe:
+  n_sims: 1000
+
+  # Data loading / CPU
+  batch_size: 1024            # 256 also ok; 512 usually faster & stable
+  num_workers: 60            # keep what you used (per node already handled in your scripts)
+
+  # Standardization (keep on)
+  standardize_x: true
+  standardize_theta: true
+
+  # Validation split (from the code change you made)
+  val_frac: 0.1
+  max_val: 2000
+  min_val: 50
+
+  # Optim
+  lr: 0.0003                 # slightly lower than 5e-4 for bigger model
+  weight_decay: 0.0004
+  max_epochs: 200            # give it room
+  early_stop_patience: 30    # don’t stop too early
+
+  # Posterior
+  n_posterior_samples: 10000 # 5k is ok, 10k gives smoother CIs in POD
+
+  # NLL dropout
+  dropout: 0.1
+
