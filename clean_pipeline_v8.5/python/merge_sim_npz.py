@@ -25,6 +25,8 @@ def _load_meta(meta_json: object) -> List[object]:
 def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--out", required=True, help="Output merged .npz path")
+    p.add_argument("--compress-output", action="store_true",
+                   help="Compress output NPZ (smaller file, slower write).")
     p.add_argument("parts", nargs="+", help="Input part .npz files")
     args = p.parse_args()
 
@@ -63,7 +65,8 @@ def main() -> None:
     X_merged = np.concatenate(Xs, axis=0).astype(np.float32, copy=False)
     Theta_merged = np.concatenate(Thetas, axis=0).astype(np.float32, copy=False)
 
-    np.savez_compressed(
+    save_fn = np.savez_compressed if args.compress_output else np.savez
+    save_fn(
         out_path,
         X=X_merged,
         Theta=Theta_merged,

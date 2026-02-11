@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import socket
 import uuid
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
@@ -44,7 +45,17 @@ def build_argparser() -> argparse.ArgumentParser:
                    help="Offset added to simulation indices for seed generation. "
                         "Use when appending to existing sims to avoid seed overlap.")
     p.add_argument("--tmpdir", default=None, help="Override trees_tmpdir from config (for node-local scratch)")
+    p.add_argument("--compress-output", action="store_true",
+                   help="Compress output NPZ (smaller files, slower write).")
     return p
+
+
+def _progress_bar(done: int, total: int, width: int = 30) -> str:
+    if total <= 0:
+        return "[" + ("-" * width) + "]"
+    frac = max(0.0, min(1.0, done / total))
+    filled = int(width * frac)
+    return "[" + ("#" * filled) + ("-" * (width - filled)) + "]"
 
 
 def _one_sim(storage_idx: int, seed_idx: int, cfg: Dict[str, Any], pop_order: List[str],
@@ -158,6 +169,7 @@ def main() -> None:
     print(f"Adaptive scaling: up to {max_scale}x (capped per-sim by min_Ne / safe_min)")
     print(f"Free parameters for NPE: {len(theta_keys_t)} ({', '.join(theta_keys_t)})")
     print("Using memory-mapped arrays to minimise RAM usage")
+    print(f"Host: {socket.gethostname()}")
 
     # Pilot simulation to determine array shapes
     print("Running pilot simulation to determine array dimensions...")
@@ -218,14 +230,36 @@ def main() -> None:
     success_mask[0] = True  # Pilot succeeded
 
     completed = 1
+    last_progress_completed = completed
+    progress_interval = 2.0
+    last_progress_t = os.times().elapsed
 
     with ProcessPoolExecutor(max_workers=workers) as ex:
-        futs = [
-            ex.submit(_one_sim, i, seed_offset + i, cfg, pop_order, theta_keys_t, size_anchors, base_seed, tmpdir, args.timeout)
-            for i in range(1, n_sims)
-        ]
+        # Keep a bounded queue of in-flight tasks to reduce scheduling overhead
+        # and memory pressure for very large n_sims.
+        pending = {}
+        next_idx = 1
+        max_inflight = max(workers * 3, workers + 1)
 
-        for fut in as_completed(futs):
+        while next_idx < n_sims and len(pending) < max_inflight:
+            fut = ex.submit(
+                _one_sim,
+                next_idx,
+                seed_offset + next_idx,
+                cfg,
+                pop_order,
+                theta_keys_t,
+                size_anchors,
+                base_seed,
+                tmpdir,
+                args.timeout,
+            )
+            pending[fut] = next_idx
+            next_idx += 1
+
+        while pending:
+            fut = next(as_completed(pending))
+            pending.pop(fut, None)
             try:
                 idx, x, theta, meta = fut.result()
                 X_mmap[idx] = x
@@ -234,11 +268,38 @@ def main() -> None:
                 success_mask[idx] = True  # Mark as successful
             except Exception as e:
                 print(f"WARNING: Simulation failed: {e}")
-                continue
+            finally:
+                completed += 1
 
-            completed += 1
-            if completed % 100 == 0:
-                print(f"Progress: {completed}/{n_sims} ({100*completed/n_sims:.1f}%)")
+            while next_idx < n_sims and len(pending) < max_inflight:
+                nf = ex.submit(
+                    _one_sim,
+                    next_idx,
+                    seed_offset + next_idx,
+                    cfg,
+                    pop_order,
+                    theta_keys_t,
+                    size_anchors,
+                    base_seed,
+                    tmpdir,
+                    args.timeout,
+                )
+                pending[nf] = next_idx
+                next_idx += 1
+
+            now_t = os.times().elapsed
+            if completed == n_sims or (now_t - last_progress_t) >= progress_interval:
+                delta_done = completed - last_progress_completed
+                delta_t = max(1e-9, now_t - last_progress_t)
+                inst_rate = delta_done / delta_t
+                bar = _progress_bar(completed, n_sims)
+                print(
+                    f"Progress {bar} {completed}/{n_sims} "
+                    f"({100*completed/n_sims:.1f}%) | {inst_rate:.2f} sims/s",
+                    flush=True,
+                )
+                last_progress_t = now_t
+                last_progress_completed = completed
 
     n_success = success_mask.sum()
     n_failed = n_sims - n_success
@@ -259,7 +320,8 @@ def main() -> None:
     # Filter metas to match successful simulations
     metas_success = [m for i, m in enumerate(metas) if success_mask[i]]
 
-    np.savez_compressed(
+    save_fn = np.savez_compressed if args.compress_output else np.savez
+    save_fn(
         out_path,
         X=X,
         Theta=Theta,

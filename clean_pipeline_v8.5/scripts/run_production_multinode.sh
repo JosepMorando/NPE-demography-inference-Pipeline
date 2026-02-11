@@ -3,15 +3,6 @@
 # Production Analysis Workflow (Multi-node)
 # Full demographic inference pipeline for real Pool-seq data across multiple nodes.
 #
-# This script is identical in logic to scripts/run_production.sh, except that
-# the simulation step (Step 2) is split across nodes and then merged.
-#
-# Default node list (override with NODES env var):
-#   NODES="geu-master geu-worker1 geu-worker2"
-#
-# Workers per node:
-#   WORKERS_PER_NODE=70
-#
 
 set -euo pipefail
 
@@ -23,7 +14,7 @@ echo "This runs the full demographic inference pipeline on your real data,"
 echo "splitting training simulations across multiple nodes and merging."
 echo ""
 echo "IMPORTANT: Have you validated the pipeline with POD testing?"
-echo "If not, run: bash scripts/run_pod_test.sh first!"
+echo "If not, run: bash scripts/run_pod_test_multinode.sh first!"
 echo ""
 
 read -p "Continue with production analysis? (y/n) " -n 1 -r
@@ -37,6 +28,7 @@ fi
 CONFIG="config/config_production.yaml"
 WORKERS_PER_NODE="${WORKERS_PER_NODE:-70}"
 NODES_STR="${NODES:-geu-master geu-worker1 geu-worker2}"
+ENABLE_SIM_COMPRESSION="${ENABLE_SIM_COMPRESSION:-0}"
 read -r -a NODES <<< "$NODES_STR"
 
 # Threading safety: avoid nested BLAS/OpenMP threading inside each worker process.
@@ -46,7 +38,7 @@ export OPENBLAS_NUM_THREADS="${OPENBLAS_NUM_THREADS:-1}"
 export NUMEXPR_NUM_THREADS="${NUMEXPR_NUM_THREADS:-1}"
 
 # Create output directories
-mkdir -p observed_data simulations models results
+mkdir -p observed_data simulations models results logs
 
 # Resolve absolute project path (must be accessible from all nodes via shared FS)
 PROJECT_ROOT="$(pwd)"
@@ -78,6 +70,7 @@ NUM_NODES="${#NODES[@]}"
 echo "Config: $CONFIG"
 echo "Nodes: ${NODES[*]}"
 echo "Workers per node: $WORKERS_PER_NODE"
+echo "Simulation compression: $ENABLE_SIM_COMPRESSION (0 is fastest)"
 echo "Total simulations: $TOTAL_SIMS"
 echo ""
 
@@ -91,7 +84,15 @@ echo ""
 
 PARTS=()
 PIDS=()
+TAIL_PIDS=()
 SEED_CURSOR=0
+
+cleanup_tails() {
+  for tpid in "${TAIL_PIDS[@]:-}"; do
+    kill "$tpid" 2>/dev/null || true
+  done
+}
+trap cleanup_tails EXIT
 
 for i in "${!NODES[@]}"; do
   node="${NODES[$i]}"
@@ -107,18 +108,36 @@ for i in "${!NODES[@]}"; do
   NODE_SEED_OFFSET="$SEED_CURSOR"
   SEED_CURSOR=$(( SEED_CURSOR + n_chunk ))
 
-  echo "[${node}] launching: n=${n_chunk}, workers=${WORKERS_PER_NODE}, out=${part_out}, seed_offset=${NODE_SEED_OFFSET}"
+  NODE_TMPDIR="/tmp/sim_scratch_${node}_$$"
+  NODE_LOCAL_OUT="${NODE_TMPDIR}/sim_part$((i+1)).npz"
+  log_file="logs/sim_${node}.log"
+  : > "$log_file"
+
+  echo "[${node}] launching: n=${n_chunk}, workers=${WORKERS_PER_NODE}, seed_offset=${NODE_SEED_OFFSET}, tmpdir=${NODE_TMPDIR}"
+
+  tail -n 0 -F "$log_file" 2>/dev/null | sed -u "s/^/[${node}] /" &
+  TAIL_PIDS+=("$!")
+
+  COMPRESS_FLAG=""
+  if [[ "$ENABLE_SIM_COMPRESSION" == "1" ]]; then
+    COMPRESS_FLAG="--compress-output"
+  fi
 
   # Launch simulation chunk on each node. Assumes shared filesystem for PROJECT_ROOT.
   ssh "$node" "cd '$PROJECT_ROOT' && \
+    mkdir -p '${NODE_TMPDIR}' && \
     export PYTHONPATH='$PROJECT_ROOT/python:\${PYTHONPATH:-}' && \
     export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 && \
-    python3 python/simulate.py \
+    python3 -u python/simulate.py \
       --config '$CONFIG' \
       --n '$n_chunk' \
-      --out '$part_out' \
+      --out '${NODE_LOCAL_OUT}' \
       --seed-offset '$NODE_SEED_OFFSET' \
-      --workers '$WORKERS_PER_NODE'" &
+      --workers '$WORKERS_PER_NODE' \
+      --tmpdir '${NODE_TMPDIR}' \
+      ${COMPRESS_FLAG} && \
+    cp '${NODE_LOCAL_OUT}' '$part_out' && \
+    rm -rf '${NODE_TMPDIR}'" > "$log_file" 2>&1 &
 
   PIDS+=("$!")
 done
@@ -131,10 +150,13 @@ for pid in "${PIDS[@]}"; do
   fi
 done
 
+cleanup_tails
+trap - EXIT
+
 if [[ "$FAIL" -ne 0 ]]; then
   echo ""
   echo "ERROR: One or more simulation chunks failed."
-  echo "Check per-node output above and partial files in simulations/."
+  echo "Check per-node output above and logs in logs/."
   exit 1
 fi
 
