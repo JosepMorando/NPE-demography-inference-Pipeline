@@ -1,6 +1,6 @@
-# NPE Demography Inference Pipeline — v8.4
+# NPE Demography Inference Pipeline — v9
 
-This is the active v8.4 pipeline.
+This is the active v9 pipeline.
 
 ## End-to-end workflow
 
