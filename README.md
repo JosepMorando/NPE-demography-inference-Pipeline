@@ -1,6 +1,6 @@
-# NPE Demography Inference Pipeline (v8.4)
+# NPE Demography Inference Pipeline (v9)
 
-This repository tracks the **current v8.4 pipeline** for demographic inference
+This repository tracks the **current v9 pipeline** for demographic inference
 in *Fagus* using:
 
 - SLiM simulations
