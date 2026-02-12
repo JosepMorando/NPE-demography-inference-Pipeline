@@ -9,7 +9,7 @@ import numpy as np
 import torch
 
 from npe_demography.config import load_config, ensure_dir
-from npe_demography.nsf import FlowConfig, NeuralSplineFlow
+from npe_demography.sbi_backend import load_sbi_posterior
 from npe_demography.priors import get_fixed_value, is_fixed
 from npe_demography.slim import render_slim_script, run_slim
 from npe_demography.summaries import compute_summaries_from_trees
@@ -27,27 +27,6 @@ def build_argparser() -> argparse.ArgumentParser:
     p.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     p.add_argument("--timeout", type=float, default=300, help="SLiM timeout per sim (seconds)")
     return p
-
-
-def _load_flow(ckpt: dict, device: torch.device) -> NeuralSplineFlow:
-    flow_cfg = ckpt.get("flow_config", {})
-    flow_config = FlowConfig(
-        hidden_sizes=list(flow_cfg.get("hidden_sizes", [256, 256])),
-        num_layers=int(flow_cfg.get("num_layers", 6)),
-        num_bins=int(flow_cfg.get("num_bins", 8)),
-        tail_bound=float(flow_cfg.get("tail_bound", 3.0)),
-        min_bin_width=float(flow_cfg.get("min_bin_width", 1e-3)),
-        min_bin_height=float(flow_cfg.get("min_bin_height", 1e-3)),
-        min_derivative=float(flow_cfg.get("min_derivative", 1e-3)),
-    )
-    model = NeuralSplineFlow(
-        theta_dim=int(ckpt["theta_dim"]),
-        context_dim=int(ckpt["x_dim"]),
-        config=flow_config,
-    ).to(device)
-    model.load_state_dict(ckpt["state_dict"])
-    model.eval()
-    return model
 
 
 def _apply_scaler(x: np.ndarray, scaler: dict | None) -> np.ndarray:
@@ -80,10 +59,10 @@ def main() -> None:
     n_hap = int(cfg["simulation"]["samples_per_group_haploid"])
 
     ckpt = torch.load(args.model, map_location="cpu", weights_only=False)
-    if ckpt.get("model_type") != "nsf":
-        raise ValueError("Checkpoint is not a Neural Spline Flow model.")
+    if ckpt.get("model_type") != "sbi_nsf":
+        raise ValueError("Checkpoint is not an sbi NSF model.")
 
-    model = _load_flow(ckpt, device)
+    model = load_sbi_posterior(ckpt, device)
     x_scaler = ckpt.get("x_scaler")
     theta_scaler = ckpt.get("theta_scaler")
     theta_keys = tuple(str(x) for x in ckpt.get("theta_keys", []))
@@ -143,7 +122,7 @@ def main() -> None:
     x_t = torch.from_numpy(x_obs_scaled).unsqueeze(0).to(device)
 
     with torch.no_grad():
-        theta_post = model.sample(args.n_ppc, x_t).cpu().numpy().astype(np.float32)
+        theta_post = model.sample((args.n_ppc,), x=x_t).cpu().numpy().astype(np.float32)
 
     theta_post = _invert_scaler(theta_post, theta_scaler)
     theta_post = inverse_transform_theta_vector(theta_post, theta_keys, size_anchors=size_anchors)

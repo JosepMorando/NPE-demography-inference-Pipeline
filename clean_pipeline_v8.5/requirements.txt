@@ -1,6 +1,7 @@
 # Python dependencies for NPE pipeline
 numpy>=1.20.0
 torch>=2.0.0
+sbi>=0.22.0
 tskit>=0.5.0
 msprime>=1.2.0
 pyyaml>=6.0
