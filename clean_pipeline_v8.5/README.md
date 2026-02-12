@@ -28,7 +28,7 @@ python3 python/simulate.py \
 
 Output: `simulations/sim_data.npz`
 
-### 3) Train posterior estimator (NSF)
+### 3) Train posterior estimator (sbi NSF)
 
 ```bash
 python3 python/train_npe.py \

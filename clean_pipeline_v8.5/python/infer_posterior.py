@@ -10,7 +10,7 @@ import numpy as np
 import torch
 
 from npe_demography.config import load_config
-from npe_demography.nsf import FlowConfig, NeuralSplineFlow
+from npe_demography.sbi_backend import load_sbi_posterior
 from npe_demography.transforms import inverse_transform_theta_vector
 from npe_demography.priors import build_size_anchors
 
@@ -146,37 +146,10 @@ def main() -> None:
 
     device = torch.device(args.device)
 
-    if ckpt.get("model_type") != "nsf":
-        raise ValueError("Checkpoint is not a Neural Spline Flow model.")
+    if ckpt.get("model_type") != "sbi_nsf":
+        raise ValueError("Checkpoint is not an sbi NSF model.")
 
-    flow_cfg = ckpt.get("flow_config", {})
-    
-    # 2. Determine dropout value
-    # If it wasn't saved in the checkpoint's flow_config, grab it from the YAML
-    dropout_val = flow_cfg.get("dropout")
-    if dropout_val is None:
-        dropout_val = cfg["npe"].get("dropout", 0.0)
-
-    # 3. Instantiate FlowConfig with the corrected dropout value
-    flow_config = FlowConfig(
-        hidden_sizes=list(flow_cfg.get("hidden_sizes", [256, 256])),
-        num_layers=int(flow_cfg.get("num_layers", 6)),
-        num_bins=int(flow_cfg.get("num_bins", 8)),
-        tail_bound=float(flow_cfg.get("tail_bound", 3.0)),
-        min_bin_width=float(flow_cfg.get("min_bin_width", 1e-3)),
-        min_bin_height=float(flow_cfg.get("min_bin_height", 1e-3)),
-        min_derivative=float(flow_cfg.get("min_derivative", 1e-3)),
-        dropout=float(dropout_val),
-    )
-
-    model = NeuralSplineFlow(
-        theta_dim=theta_dim,
-        context_dim=x_dim,
-        config=flow_config,
-    ).to(device)
-
-    model.load_state_dict(ckpt["state_dict"])
-    model.eval()
+    model = load_sbi_posterior(ckpt, device)
 
     x_scaler = ckpt.get("x_scaler")
     theta_scaler = ckpt.get("theta_scaler")
@@ -218,7 +191,7 @@ def main() -> None:
     # Draw exactly n_samples and decode from unconstrained space.
     # We intentionally avoid posterior truncation by prior bounds.
     with torch.no_grad():
-        theta_post_t = model.sample(n_samples, x_t)
+        theta_post_t = model.sample((n_samples,), x=x_t)
 
     theta_post = theta_post_t.cpu().numpy().astype(np.float32)
 
