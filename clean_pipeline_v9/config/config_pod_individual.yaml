@@ -1,0 +1,133 @@
+project:
+  name: "fagus_pod_individual_v1"
+  seed: 12345  # Fixed seed for reproducibility
+  output_dir: "pod_individual_results"
+
+observed:
+  pooldata_rdata: "observed_data/Pooldata_demography.RData"
+  pooldata_object: "filt.pooldata"
+  groups_csv: "config/groups_12individuals.csv"
+  target_cov: 10  # Match production setting
+
+simulation:
+  slim_binary: "/home/j_morando/.local/bin/slim"
+  slim_template: "templates/model_individual_pops.slim.tpl"
+  trees_tmpdir: "/dev/shm"
+
+  # Population order: all 12 individual populations
+  pop_order: ['p1', 'p3', 'p8', 'p9', 'p10', 'p11', 'p13', 'p16', 'p18', 'p19', 'p21', 'p22']
+
+  # Adaptive scaling - allow higher scale for POD testing
+  max_scale_factor: 1000
+  safe_min_diploids: 10
+
+  # Timeline - moderate for POD testing
+  burnin: 2000
+  gens: 12000
+  genome_length: 2e6  # 2 Mb for POD (lighter than 20 Mb production)
+  recombination_rate: 1e-8
+
+  mutation_overlay:
+    enable: true
+    mu: 7.77e-9
+    model: "binary"
+    target_snps: null
+
+  samples_per_group_haploid: 10  # Lighter sampling for POD testing
+
+priors:
+  times:
+    # Tighter ranges than production for faster POD convergence
+    # Following phylogeny constraints
+    T_P001:             {min:  500, max: 1500}
+    T_BG01:             {min: 1500, max: 3000}
+    T_MAJOR_SPLIT:      {min: 3000, max: 5000}
+    T_Sauva:            {min: 5000, max: 7000}
+    T_BG07:             {min: 7000, max: 9000}
+    T_BG05_BG04:        {min: 9000, max: 11000}
+    T_Montsenymid:      {min: 5000, max: 7000}
+    T_PYRENEES:         {min: 7000, max: 9000}
+    T_Carlac:           {min: 9000, max: 11000}
+    T_Conangles_Viros:  {min: 11000, max: 13000}
+    T_Cimadal_Coscollet: {min: 9000, max: 11000}
+
+  sizes:
+    # FIXED: Ghost populations
+    N0:                 {dist: fixed, value: 10000}
+    N_Node1:            {dist: fixed, value: 10000}
+    N_Node2:            {dist: fixed, value: 10000}
+    N_Node3:            {dist: fixed, value: 10000}
+    N_Node4:            {dist: fixed, value: 10000}
+    N_Node5:            {dist: fixed, value: 10000}
+    N_Node6:            {dist: fixed, value: 10000}
+    N_Node7:            {dist: fixed, value: 10000}
+    N_Node8:            {dist: fixed, value: 10000}
+    N_Node9:            {dist: fixed, value: 10000}
+    N_Node10:           {dist: fixed, value: 10000}
+
+    # FREE: All sampled populations - narrower ranges for POD
+    N_P001:             {dist: loguniform, min:  2000, max: 40000}
+    N_BG01:             {dist: loguniform, min:  2000, max: 40000}
+    N_BG05:             {dist: loguniform, min:  2000, max: 40000}
+    N_BG04:             {dist: loguniform, min:  2000, max: 40000}
+    N_BG07:             {dist: loguniform, min:  2000, max: 40000}
+    N_Sauva:            {dist: loguniform, min:  2000, max: 40000}
+    N_Montsenymid:      {dist: loguniform, min:  2000, max: 40000}
+    N_Carlac:           {dist: loguniform, min:  2000, max: 40000}
+    N_Conangles:        {dist: loguniform, min:  2000, max: 40000}
+    N_Viros:            {dist: loguniform, min:  2000, max: 40000}
+    N_Cimadal:          {dist: loguniform, min:  2000, max: 40000}
+    N_Coscollet:        {dist: loguniform, min:  2000, max: 40000}
+
+  demography_extras:
+    enable: true  # Test with bottlenecks
+    bottleneck:
+      mode: per_population
+      # All 12 individual populations can have bottlenecks
+      populations: ['P001', 'BG01', 'BG05', 'BG04', 'BG07', 'Sauva',
+                    'Montsenymid', 'Carlac', 'Conangles', 'Viros',
+                    'Cimadal', 'Coscollet']
+      time_fraction: {dist: uniform, min: 0.2, max: 0.6}
+      size_fraction: {dist: loguniform, min: 0.01, max: 0.4}
+      duration_gens: {dist: discrete_uniform, min: 10, max: 500}
+    expansion:
+      enable: false
+    migration:
+      enable: false
+
+npe:
+  # Simulation budget - moderate for POD testing
+  n_sims: 50000  # Reduced from 100k production
+
+  # Dataloader / training
+  batch_size: 512   # Smaller batch for POD
+  num_workers: 30   # Fewer workers for POD
+
+  # Model capacity - lighter architecture for POD
+  hidden_sizes: [128, 128]  # Reduced from [256, 256]
+  flow:
+    hidden_sizes: [128, 128]
+    num_layers: 4  # Reduced from 5
+    num_bins: 6    # Reduced from 8
+    tail_bound: 3.0
+
+  # Optimization
+  lr: 0.0005                # Slightly higher LR for faster convergence
+  weight_decay: 0.0001      # Lighter regularization
+
+  # Regularization
+  dropout: 0.1
+
+  # Training schedule
+  max_epochs: 150           # Fewer epochs for POD
+  early_stop_patience: 25
+
+  # Normalization
+  standardize_x: true
+  standardize_theta: true
+
+  # Posterior sampling
+  n_posterior_samples: 10000  # Sufficient for POD
+  val_frac: 0.1
+  max_val: 2000
+  min_val: 50

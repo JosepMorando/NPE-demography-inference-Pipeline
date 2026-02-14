@@ -186,6 +186,113 @@ Common values:
 - **20**: Production setting (original model)
 - **30**: High coverage, stricter filtering
 
+## POD Testing (Validation)
+
+**IMPORTANT:** Always run POD (Parameters Of Data) tests before production analysis to validate that the pipeline can recover known parameters.
+
+### Quick Start - Single Node
+
+For local testing or single-node execution:
+
+```bash
+cd clean_pipeline_v9
+bash scripts/run_pod_test_individual.sh
+```
+
+**Runtime:** ~3-6 hours on single node with 30 workers
+- POD generation: ~5-10 minutes
+- 50k simulations: ~2-4 hours
+- Training: ~30-60 minutes (GPU) or 2-4 hours (CPU)
+- Inference + validation: ~10-20 minutes
+
+### Multi-Node Execution (Recommended)
+
+For distributed execution across multiple compute nodes:
+
+```bash
+cd clean_pipeline_v9
+
+# Set environment variables
+export NODES="node1 node2 node3"
+export WORKERS_PER_NODE=70
+
+bash scripts/run_pod_test_multinode_individual.sh
+```
+
+**Runtime:** ~5-11 hours on 3 nodes with 70 workers each
+- Simulation generation parallelized across nodes
+- ~3x faster than single-node
+
+### POD Test Workflow (7 Steps)
+
+1. **Generate POD**: Create synthetic "observed" data with known parameters
+2. **Simulations**: Generate 50,000 training simulations (distributed)
+3. **Train NSF**: Train neural spline flow model
+4. **Infer Posterior**: Recover parameters from POD data
+5. **Check Recovery**: Validate parameter recovery statistics
+6. **SBC Validation**: Simulation-Based Calibration
+7. **PPC Validation**: Posterior Predictive Checks
+
+### Interpreting POD Results
+
+**Success Criteria:**
+- ✅ **Coverage ~90-95%**: True parameters within 95% credible intervals
+- ✅ **Relative Error <20%**: Posterior means close to true values
+- ✅ **No systematic bias**: Errors distributed symmetrically
+
+**Coverage Interpretation (for 59-parameter model):**
+- **Excellent:** 90-100% coverage → Ready for production
+- **Good:** 85-90% coverage → Acceptable, proceed with caution
+- **Warning:** 75-85% coverage → Consider increasing n_sims to 75k-100k
+- **Poor:** <75% coverage → Increase n_sims or investigate pipeline issues
+
+**Results Location:**
+- **Recovery plots:** `pod_individual/results/recovery_*.pdf`
+- **Console output:** Coverage statistics and parameter-wise results
+- **Detailed report:** `pod_individual/results/recovery_report.json`
+
+### Troubleshooting POD Results
+
+If coverage is suboptimal:
+
+1. **Increase simulation budget:**
+   ```yaml
+   # In config/config_pod_individual.yaml
+   npe:
+     n_sims: 75000  # or 100000
+   ```
+
+2. **Test hierarchically:**
+   ```yaml
+   # First test without bottlenecks (23 parameters)
+   demography_extras:
+     enable: false
+   ```
+   If this works well, re-enable bottlenecks and test again.
+
+3. **Check summary statistics:**
+   - Ensure observed and simulated data are on similar scales
+   - Review plots in `pod_individual/results/`
+
+4. **Increase network capacity (if needed):**
+   ```yaml
+   npe:
+     hidden_sizes: [256, 256]  # Increase from [128, 128]
+     flow:
+       num_layers: 5  # Increase from 4
+   ```
+
+### Reusing Simulations
+
+To add more simulations without re-generating everything:
+
+```bash
+# Multinode with reuse
+bash scripts/run_pod_test_multinode_individual.sh --reuse pod_individual/simulations/sim_data.npz
+
+# This will generate additional simulations to reach target n_sims
+```
+
 ## Running the Pipeline
 
 ### 1. Compute Observed Summary Statistics
