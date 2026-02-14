@@ -40,7 +40,7 @@ p0 (Ancestral)
                └─ p22 (Coscollet)
 ```
 
-### Sampled Populations (12)
+### Modeled Populations (12)
 
 1. **P001** (p1) - Basal lineage
 2. **BG01** (p3) - Early diverging lineage
@@ -77,27 +77,26 @@ These intermediate populations are required for the phylogenetic structure but a
 Key features:
 - **Coverage threshold**: 10 (easily configurable via `observed.target_cov`)
 - **Template**: `templates/model_individual_pops.slim.tpl`
-- **Population order**: All 12 sampled populations
+- **Population order for comparison**: 11 observed populations (P001 excluded as outgroup)
 - **Bottleneck inference**: Enabled with per-population mode
 
-### 2. Population Mapping: `config/groups_12individuals.csv`
+### 2. Population Mapping for inference: `config/groups_11pops.csv`
 
-Maps each population to itself (no grouping):
+Maps each observed population to itself (no grouping). `P001` is excluded from summary comparison because it is an outgroup not present in observed data:
 
 ```csv
 Pop,Group
-P001,P001
 BG01,BG01
-BG05,BG05
-BG04,BG04
-BG07,BG07
 Sauva,Sauva
 Montsenymid,Montsenymid
+BG04,BG04
+BG05,BG05
+BG07,BG07
+Coscollet,Coscollet
+Cimadal,Cimadal
 Carlac,Carlac
 Conangles,Conangles
 Viros,Viros
-Cimadal,Cimadal
-Coscollet,Coscollet
 ```
 
 ### 3. SLiM Template: `templates/model_individual_pops.slim.tpl`
@@ -301,7 +300,7 @@ bash scripts/run_pod_test_multinode_individual.sh --reuse pod_individual/simulat
 Rscript r/compute_observed_summaries.R \
   --pooldata observed_data/Pooldata_demography.RData \
   --object filt.pooldata \
-  --groups config/groups_12individuals.csv \
+  --groups config/groups_11pops.csv \
   --target_cov 10 \
   --out observed_data/observed_summaries_individual.npz
 ```

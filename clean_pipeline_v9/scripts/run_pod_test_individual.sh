@@ -24,7 +24,7 @@ mkdir -p "$POD_DIR"/{simulations,models,results}
 
 # Validate required files
 echo "Validating configuration files..."
-for file in "$CONFIG" "config/groups_12individuals.csv" "templates/model_individual_pops.slim.tpl"; do
+for file in "$CONFIG" "config/groups_11pops.csv" "templates/model_individual_pops.slim.tpl"; do
   if [[ ! -f "$file" ]]; then
     echo "ERROR: Required file not found: $file"
     exit 1
