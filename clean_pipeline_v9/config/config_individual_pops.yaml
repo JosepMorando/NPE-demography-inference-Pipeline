@@ -1,0 +1,145 @@
+project:
+  name: "fagus_npe_individual_populations_v1"
+  seed: 42
+  output_dir: "individual_pops_results"
+
+observed:
+  pooldata_rdata: "observed_data/Pooldata_demography.RData"
+  pooldata_object: "filt.pooldata"
+  groups_csv: "config/groups_12individuals.csv"
+  target_cov: 10  # Configurable coverage threshold (easily changeable)
+
+simulation:
+  slim_binary: "/home/j_morando/.local/bin/slim"
+  slim_template: "templates/model_individual_pops.slim.tpl"
+  trees_tmpdir: "/dev/shm"
+
+  # Population order: sampled populations only
+  # Following phylogeny: ((P001,(BG01,((((BG05,BG04),BG07),Sauva),(Montsenymid,((Carlac,(Conangles,Viros)),(Cimadal,Coscollet)))))))
+  pop_order: ['p1', 'p3', 'p8', 'p9', 'p10', 'p11', 'p13', 'p16', 'p18', 'p19', 'p21', 'p22']
+
+  # Adaptive scaling
+  max_scale_factor: 100
+  safe_min_diploids: 50
+
+  # Timeline
+  burnin: 2000
+  gens: 12000
+  genome_length: 2e7
+  recombination_rate: 1e-8
+
+  mutation_overlay:
+    enable: true
+    mu: 7.77e-9
+    model: "binary"
+    target_snps: null
+
+  samples_per_group_haploid: 20
+
+priors:
+  times:
+    # Following phylogenetic hierarchy (oldest to most recent)
+    # Root split: P001 vs rest
+    T_P001:           {min:  100, max: 10000}
+
+    # BG01 splits from Node1
+    T_BG01:           {min:  200, max: 10500}
+
+    # Major split: southern vs northern clades
+    T_MAJOR_SPLIT:    {min:  300, max: 11000}
+
+    # Southern clade splits
+    T_Sauva:          {min:  400, max: 11500}
+    T_BG07:           {min:  500, max: 12000}
+    T_BG05_BG04:      {min:  600, max: 12500}
+
+    # Northern clade splits
+    T_Montsenymid:    {min:  400, max: 11500}
+    T_PYRENEES:       {min:  500, max: 12000}
+
+    # Western Pyrenees
+    T_Carlac:         {min:  600, max: 12500}
+    T_Conangles_Viros: {min: 700, max: 13000}
+
+    # Eastern Pyrenees
+    T_Cimadal_Coscollet: {min: 600, max: 12500}
+
+  sizes:
+    # FIXED: Ancestral and ghost populations
+    N0:               {dist: fixed, value: 10000}
+    N_Node1:          {dist: fixed, value: 10000}
+    N_Node2:          {dist: fixed, value: 10000}
+    N_Node3:          {dist: fixed, value: 10000}
+    N_Node4:          {dist: fixed, value: 10000}
+    N_Node5:          {dist: fixed, value: 10000}
+    N_Node6:          {dist: fixed, value: 10000}
+    N_Node7:          {dist: fixed, value: 10000}
+    N_Node8:          {dist: fixed, value: 10000}
+    N_Node9:          {dist: fixed, value: 10000}
+    N_Node10:         {dist: fixed, value: 10000}
+
+    # FREE: All sampled populations
+    N_P001:           {dist: loguniform, min:  2500, max: 150000}
+    N_BG01:           {dist: loguniform, min:  2500, max: 150000}
+    N_BG05:           {dist: loguniform, min:  2500, max: 150000}
+    N_BG04:           {dist: loguniform, min:  2500, max: 150000}
+    N_BG07:           {dist: loguniform, min:  2500, max: 150000}
+    N_Sauva:          {dist: loguniform, min:  2500, max: 150000}
+    N_Montsenymid:    {dist: loguniform, min:  2500, max: 150000}
+    N_Carlac:         {dist: loguniform, min:  2500, max: 150000}
+    N_Conangles:      {dist: loguniform, min:  2500, max: 150000}
+    N_Viros:          {dist: loguniform, min:  2500, max: 150000}
+    N_Cimadal:        {dist: loguniform, min:  2500, max: 150000}
+    N_Coscollet:      {dist: loguniform, min:  2500, max: 150000}
+
+  demography_extras:
+    enable: true  # Enable bottleneck inference
+    bottleneck:
+      mode: per_population  # Infer bottlenecks for each population
+      # Populations that can have bottlenecks (all sampled pops)
+      populations: ['P001', 'BG01', 'BG05', 'BG04', 'BG07', 'Sauva', 'Montsenymid',
+                    'Carlac', 'Conangles', 'Viros', 'Cimadal', 'Coscollet']
+      time_fraction: {dist: uniform, min: 0.2, max: 0.6}
+      size_fraction: {dist: loguniform, min: 0.05, max: 0.3}
+      duration_gens: {dist: discrete_uniform, min: 10, max: 100}
+    expansion:
+      enable: false
+    migration:
+      enable: false
+
+npe:
+  # Simulation budget
+  n_sims: 100000
+
+  # Dataloader / training
+  batch_size: 1024
+  num_workers: 60
+
+  # Model capacity
+  hidden_sizes: [256, 256]
+  flow:
+    hidden_sizes: [256, 256]
+    num_layers: 5
+    num_bins: 8
+    tail_bound: 3.0
+
+  # Optimization
+  lr: 0.0003
+  weight_decay: 0.0004
+
+  # Regularization
+  dropout: 0.1
+
+  # Training schedule
+  max_epochs: 200
+  early_stop_patience: 30
+
+  # Normalization
+  standardize_x: true
+  standardize_theta: true
+
+  # Posterior sampling
+  n_posterior_samples: 20000
+  val_frac: 0.1
+  max_val: 2000
+  min_val: 50
