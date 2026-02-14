@@ -74,11 +74,20 @@ def main():
     # Check constraints (sanity check, though sample_from_prior should enforce them)
     print("Checking phylogenetic constraints...")
     ok = True
-    ok &= theta_true['T_BG01'] < theta_true['T_CORE']
-    ok &= theta_true['T_CORE'] < theta_true['T_SOUTH_LOW'] < theta_true['T_EAST']
-    ok &= theta_true['T_CORE'] < theta_true['T_SOUTH_MID']
-    ok &= theta_true['T_CORE'] < theta_true['T_INT'] < theta_true['T_CENTRAL']
-    ok &= theta_true['T_CORE'] < theta_true['T_INT'] < theta_true['T_PYRENEES']
+    if "T_P001" in theta_true:
+        # Individual-populations model constraints
+        ok &= theta_true['T_P001'] < theta_true['T_BG01'] < theta_true['T_MAJOR_SPLIT']
+        ok &= theta_true['T_MAJOR_SPLIT'] < theta_true['T_Sauva'] < theta_true['T_BG07'] < theta_true['T_BG05_BG04']
+        ok &= theta_true['T_MAJOR_SPLIT'] < theta_true['T_Montsenymid'] < theta_true['T_PYRENEES']
+        ok &= theta_true['T_PYRENEES'] < theta_true['T_Carlac'] < theta_true['T_Conangles_Viros']
+        ok &= theta_true['T_PYRENEES'] < theta_true['T_Cimadal_Coscollet']
+    else:
+        # Grouped-populations model constraints
+        ok &= theta_true['T_BG01'] < theta_true['T_CORE']
+        ok &= theta_true['T_CORE'] < theta_true['T_SOUTH_LOW'] < theta_true['T_EAST']
+        ok &= theta_true['T_CORE'] < theta_true['T_SOUTH_MID']
+        ok &= theta_true['T_CORE'] < theta_true['T_INT'] < theta_true['T_CENTRAL']
+        ok &= theta_true['T_CORE'] < theta_true['T_INT'] < theta_true['T_PYRENEES']
 
     if not ok:
         print("ERROR: True parameters violate phylogenetic constraints!")

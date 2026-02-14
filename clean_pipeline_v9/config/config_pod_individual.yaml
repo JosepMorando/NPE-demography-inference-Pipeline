@@ -6,7 +6,7 @@ project:
 observed:
   pooldata_rdata: "observed_data/Pooldata_demography.RData"
   pooldata_object: "filt.pooldata"
-  groups_csv: "config/groups_12individuals.csv"
+  groups_csv: "config/groups_11pops.csv"
   target_cov: 10  # Match production setting
 
 simulation:
@@ -15,7 +15,7 @@ simulation:
   trees_tmpdir: "/dev/shm"
 
   # Population order: all 12 individual populations
-  pop_order: ['p1', 'p3', 'p8', 'p9', 'p10', 'p11', 'p13', 'p16', 'p18', 'p19', 'p21', 'p22']
+  pop_order: ['p3', 'p8', 'p9', 'p10', 'p11', 'p13', 'p16', 'p18', 'p19', 'p21', 'p22']
 
   # Adaptive scaling - allow higher scale for POD testing
   max_scale_factor: 1000

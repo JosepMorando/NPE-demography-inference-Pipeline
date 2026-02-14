@@ -11,15 +11,6 @@ import torch
 from npe_demography.config import load_config, ensure_dir
 from npe_demography.sbi_backend import load_sbi_posterior
 from npe_demography.priors import get_fixed_value, is_fixed
-# --- CRITICAL FIX: Dynamic GENS extension ---
-# Ensure simulation is long enough for the deepest split time in this sample
-max_t_sample = max([float(v) for k,v in params.items() if k.startswith('T_')] + [0])
-burnin_val = float(cfg['simulation'].get('burnin', 0))
-# Use config GENS or (max_t + burnin + buffer), whichever is larger
-config_gens = float(cfg['simulation'].get('gens', 0))
-needed_gens = max_t_sample + burnin_val + 500
-params['GENS'] = max(config_gens, needed_gens)
-# ------------------------------------------
 from npe_demography.slim import render_slim_script, run_slim
 from npe_demography.summaries import compute_summaries_from_trees
 from npe_demography.transforms import inverse_transform_theta_vector
@@ -58,6 +49,15 @@ def _load_obs(path: str) -> np.ndarray:
         return obs["x_obs"].astype(np.float32)
     raise KeyError(f"Observed NPZ must contain 'x' or 'x_obs'. Keys found: {list(obs.keys())}")
 
+
+
+
+def _ensure_simulation_horizon(cfg: dict, params: dict, buffer_gens: int = 500) -> None:
+    """Ensure cfg.simulation.gens can accommodate the deepest split in `params`."""
+    max_t_sample = max([float(v) for k, v in params.items() if k.startswith("T_")] + [0.0])
+    burnin_val = float(cfg["simulation"].get("burnin", 0))
+    needed_gens = int(np.ceil(max_t_sample + burnin_val + buffer_gens))
+    cfg["simulation"]["gens"] = int(max(int(cfg["simulation"].get("gens", 0)), needed_gens))
 
 def main() -> None:
     args = build_argparser().parse_args()
@@ -146,6 +146,7 @@ def main() -> None:
     for i in range(args.n_ppc):
         params = {k: float(theta_post[i, j]) for j, k in enumerate(theta_keys)}
         params.update(fixed_params)
+        _ensure_simulation_horizon(cfg, params)
         run_id = f"ppc_{i:05d}"
         trees_path = Path(tmpdir) / f"{run_id}.trees"
         slim_script = Path(tmpdir) / f"{run_id}.slim"
