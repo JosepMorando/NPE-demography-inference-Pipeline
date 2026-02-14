@@ -109,33 +109,50 @@ def sample_times_individual_pops(times_cfg: Dict[str, Any], rng: np.random.Gener
         if "min" not in times_cfg[k] or "max" not in times_cfg[k]:
             raise ValueError(f"times.{k} must define min and max")
 
-    for attempt in range(50000):
-        t = {k: int(rng.integers(int(times_cfg[k]["min"]), int(times_cfg[k]["max"]) + 1)) for k in keys}
+    def _bounds(name: str) -> Tuple[int, int]:
+        cfg = times_cfg[name]
+        return int(cfg["min"]), int(cfg["max"])
 
-        # Check all phylogenetic constraints
-        # Main trunk
-        if not (t["T_P001"] < t["T_BG01"] < t["T_MAJOR_SPLIT"]):
-            continue
+    def _pick(name: str, lo: int, hi: int) -> int:
+        mn, mx = _bounds(name)
+        a = max(mn, lo)
+        b = min(mx, hi)
+        if a > b:
+            raise RuntimeError(
+                f"Infeasible bounds for {name}: prior [{mn}, {mx}] and constraint-adjusted [{a}, {b}] do not overlap."
+            )
+        return int(rng.integers(a, b + 1))
 
-        # Southern branch
-        if not (t["T_MAJOR_SPLIT"] < t["T_Sauva"] < t["T_BG07"] < t["T_BG05_BG04"]):
-            continue
+    # Direct constrained sampling (no rejection loop).
+    # Use maxima of descendant chains to ensure all strict inequalities can be satisfied.
+    t_conangles_viros = _pick("T_Conangles_Viros", -10**9, 10**9)
+    t_bg05_bg04 = _pick("T_BG05_BG04", -10**9, 10**9)
+    t_carlac = _pick("T_Carlac", -10**9, t_conangles_viros - 1)
+    t_bg07 = _pick("T_BG07", -10**9, t_bg05_bg04 - 1)
 
-        # Northern branch - main split
-        if not (t["T_MAJOR_SPLIT"] < t["T_Montsenymid"] < t["T_PYRENEES"]):
-            continue
+    max_major_split = min(t_bg07 - 2, t_carlac - 2)
+    t_major_split = _pick("T_MAJOR_SPLIT", -10**9, max_major_split)
 
-        # Western Pyrenees
-        if not (t["T_PYRENEES"] < t["T_Carlac"] < t["T_Conangles_Viros"]):
-            continue
+    t_sauva = _pick("T_Sauva", t_major_split + 1, t_bg07 - 1)
+    t_pyreenees = _pick("T_PYRENEES", t_major_split + 2, t_carlac - 1)
+    t_montsenymid = _pick("T_Montsenymid", t_major_split + 1, t_pyreenees - 1)
+    t_cimadal_coscollet = _pick("T_Cimadal_Coscollet", t_pyreenees + 1, 10**9)
+    t_bg01 = _pick("T_BG01", -10**9, t_major_split - 1)
+    t_p001 = _pick("T_P001", -10**9, t_bg01 - 1)
 
-        # Eastern Pyrenees
-        if not (t["T_PYRENEES"] < t["T_Cimadal_Coscollet"]):
-            continue
-
-        return t
-
-    raise RuntimeError("Failed to sample times satisfying constraints after 50,000 attempts. Widen prior bounds.")
+    return {
+        "T_P001": t_p001,
+        "T_BG01": t_bg01,
+        "T_MAJOR_SPLIT": t_major_split,
+        "T_Sauva": t_sauva,
+        "T_BG07": t_bg07,
+        "T_BG05_BG04": t_bg05_bg04,
+        "T_Montsenymid": t_montsenymid,
+        "T_PYRENEES": t_pyreenees,
+        "T_Carlac": t_carlac,
+        "T_Conangles_Viros": t_conangles_viros,
+        "T_Cimadal_Coscollet": t_cimadal_coscollet,
+    }
 
 
 def is_fixed(scfg: Dict[str, Any]) -> bool:
