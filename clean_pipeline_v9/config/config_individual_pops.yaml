@@ -6,7 +6,7 @@ project:
 observed:
   pooldata_rdata: "observed_data/Pooldata_demography.RData"
   pooldata_object: "filt.pooldata"
-  groups_csv: "config/groups_12individuals.csv"
+  groups_csv: "config/groups_11pops.csv"
   target_cov: 10  # Configurable coverage threshold (easily changeable)
 
 simulation:
@@ -14,9 +14,9 @@ simulation:
   slim_template: "templates/model_individual_pops.slim.tpl"
   trees_tmpdir: "/dev/shm"
 
-  # Population order: sampled populations only
+  # Population order used for summary statistics (exclude P001 outgroup)
   # Following phylogeny: ((P001,(BG01,((((BG05,BG04),BG07),Sauva),(Montsenymid,((Carlac,(Conangles,Viros)),(Cimadal,Coscollet)))))))
-  pop_order: ['p1', 'p3', 'p8', 'p9', 'p10', 'p11', 'p13', 'p16', 'p18', 'p19', 'p21', 'p22']
+  pop_order: ['p3', 'p8', 'p9', 'p10', 'p11', 'p13', 'p16', 'p18', 'p19', 'p21', 'p22']
 
   # Adaptive scaling
   max_scale_factor: 100
