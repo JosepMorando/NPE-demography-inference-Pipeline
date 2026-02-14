@@ -23,7 +23,7 @@ def sample_times_with_constraints(times_cfg: Dict[str, Any], rng: np.random.Gene
     """Sample split times with hard phylogeny constraints.
 
     Phylogeny structure from the SLiM template:
-    
+
     p0 (ancestor)
     ├─ p1 (BG01) at T_BG01
        └─ p2 (CORE) at T_CORE
@@ -66,6 +66,78 @@ def sample_times_with_constraints(times_cfg: Dict[str, Any], rng: np.random.Gene
     raise RuntimeError("Failed to sample times satisfying constraints after 50,000 attempts. Widen prior bounds.")
 
 
+def sample_times_individual_pops(times_cfg: Dict[str, Any], rng: np.random.Generator) -> Dict[str, int]:
+    """Sample split times for individual populations model.
+
+    Phylogeny: ((P001,(BG01,((((BG05,BG04),BG07),Sauva),(Montsenymid,((Carlac,(Conangles,Viros)),(Cimadal,Coscollet)))))))
+
+    Structure:
+    p0 (ancestor)
+    ├─ p1 (P001) at T_P001
+    └─ p2 (Node1) at T_P001
+       ├─ p3 (BG01) at T_BG01
+       └─ p4 (Node2) at T_BG01
+          ├─ p5 (Node3, southern) at T_MAJOR_SPLIT
+          │  ├─ p11 (Sauva) at T_Sauva
+          │  └─ p6 (Node4) at T_Sauva
+          │     ├─ p10 (BG07) at T_BG07
+          │     └─ p7 (Node5) at T_BG07
+          │        ├─ p8 (BG05) at T_BG05_BG04
+          │        └─ p9 (BG04) at T_BG05_BG04
+          └─ p12 (Node6, northern) at T_MAJOR_SPLIT
+             ├─ p13 (Montsenymid) at T_Montsenymid
+             └─ p14 (Node7, Pyrenees) at T_Montsenymid
+                ├─ p15 (Node8, west) at T_PYRENEES
+                │  ├─ p16 (Carlac) at T_Carlac
+                │  └─ p17 (Node9) at T_Carlac
+                │     ├─ p18 (Conangles) at T_Conangles_Viros
+                │     └─ p19 (Viros) at T_Conangles_Viros
+                └─ p20 (Node10, east) at T_PYRENEES
+                   ├─ p21 (Cimadal) at T_Cimadal_Coscollet
+                   └─ p22 (Coscollet) at T_Cimadal_Coscollet
+
+    Required constraints (forward-time: parent splits BEFORE children):
+    - T_P001 < T_BG01
+    - T_BG01 < T_MAJOR_SPLIT
+    - T_MAJOR_SPLIT < T_Sauva < T_BG07 < T_BG05_BG04 (southern branch)
+    - T_MAJOR_SPLIT < T_Montsenymid < T_PYRENEES (northern branch)
+    - T_PYRENEES < T_Carlac < T_Conangles_Viros (western Pyrenees)
+    - T_PYRENEES < T_Cimadal_Coscollet (eastern Pyrenees)
+    """
+    keys = list(times_cfg.keys())
+    for k in keys:
+        if "min" not in times_cfg[k] or "max" not in times_cfg[k]:
+            raise ValueError(f"times.{k} must define min and max")
+
+    for attempt in range(50000):
+        t = {k: int(rng.integers(int(times_cfg[k]["min"]), int(times_cfg[k]["max"]) + 1)) for k in keys}
+
+        # Check all phylogenetic constraints
+        # Main trunk
+        if not (t["T_P001"] < t["T_BG01"] < t["T_MAJOR_SPLIT"]):
+            continue
+
+        # Southern branch
+        if not (t["T_MAJOR_SPLIT"] < t["T_Sauva"] < t["T_BG07"] < t["T_BG05_BG04"]):
+            continue
+
+        # Northern branch - main split
+        if not (t["T_MAJOR_SPLIT"] < t["T_Montsenymid"] < t["T_PYRENEES"]):
+            continue
+
+        # Western Pyrenees
+        if not (t["T_PYRENEES"] < t["T_Carlac"] < t["T_Conangles_Viros"]):
+            continue
+
+        # Eastern Pyrenees
+        if not (t["T_PYRENEES"] < t["T_Cimadal_Coscollet"]):
+            continue
+
+        return t
+
+    raise RuntimeError("Failed to sample times satisfying constraints after 50,000 attempts. Widen prior bounds.")
+
+
 def is_fixed(scfg: Dict[str, Any]) -> bool:
     """Check if a prior specification is fixed (not free)."""
     return str(scfg.get("dist", "")).lower() == "fixed"
@@ -74,6 +146,23 @@ def is_fixed(scfg: Dict[str, Any]) -> bool:
 def get_fixed_value(scfg: Dict[str, Any]) -> float:
     """Get the fixed value from a prior specification."""
     return float(scfg["value"])
+
+
+def _is_individual_pops_model(cfg: Dict[str, Any]) -> bool:
+    """Detect if using individual populations model based on config."""
+    template_path = cfg.get("simulation", {}).get("slim_template", "")
+    return "individual" in str(template_path).lower()
+
+
+def _get_population_list(cfg: Dict[str, Any]) -> List[str]:
+    """Get list of population names based on model type."""
+    if _is_individual_pops_model(cfg):
+        # Individual populations model
+        return ["P001", "BG01", "BG05", "BG04", "BG07", "Sauva", "Montsenymid",
+                "Carlac", "Conangles", "Viros", "Cimadal", "Coscollet"]
+    else:
+        # Grouped populations model
+        return ["BG01", "SOUTH_LOW", "SOUTH_MID", "EAST", "CENTRAL", "PYRENEES"]
 
 
 def sample_from_prior(cfg: Dict[str, Any], rng: np.random.Generator) -> Dict[str, Any]:
@@ -88,8 +177,11 @@ def sample_from_prior(cfg: Dict[str, Any], rng: np.random.Generator) -> Dict[str
     """
     pri = cfg["priors"]
 
-    # Times (biological generations)
-    times = sample_times_with_constraints(pri["times"], rng)
+    # Times (biological generations) - use appropriate function based on model
+    if _is_individual_pops_model(cfg):
+        times = sample_times_individual_pops(pri["times"], rng)
+    else:
+        times = sample_times_with_constraints(pri["times"], rng)
 
     # Population sizes (diploid) — supports fixed and loguniform
     sizes_out: Dict[str, int] = {}
@@ -124,9 +216,9 @@ def sample_from_prior(cfg: Dict[str, Any], rng: np.random.Generator) -> Dict[str
         
         elif bn_mode == "per_population":
             # New: independent bottleneck parameters for each population
-            # Population identifiers from DEFAULT_SUBPOP_TO_TSPLIT
-            pops = ["BG01", "SOUTH_LOW", "SOUTH_MID", "EAST", "CENTRAL", "PYRENEES"]
-            
+            # Get populations from config or use default based on model
+            pops = bn.get("populations", _get_population_list(cfg))
+
             for pop in pops:
                 out[f"BN_TIME_FRAC_{pop}"] = _continuous_uniform(rng, float(bn["time_fraction"]["min"]), float(bn["time_fraction"]["max"]))
                 out[f"BN_SIZE_FRAC_{pop}"] = _loguniform(rng, float(bn["size_fraction"]["min"]), float(bn["size_fraction"]["max"]))
@@ -194,7 +286,8 @@ def build_theta_keys(cfg: Dict[str, Any]) -> Tuple[str, ...]:
             keys += ["BN_TIME_FRAC", "BN_SIZE_FRAC", "BN_DUR"]
         elif bn_mode == "per_population":
             # New: per-population bottleneck parameters
-            pops = ["BG01", "SOUTH_LOW", "SOUTH_MID", "EAST", "CENTRAL", "PYRENEES"]
+            # Get populations from config or use default based on model
+            pops = bn.get("populations", _get_population_list(cfg))
             for pop in pops:
                 keys += [f"BN_TIME_FRAC_{pop}", f"BN_SIZE_FRAC_{pop}", f"BN_DUR_{pop}"]
 
