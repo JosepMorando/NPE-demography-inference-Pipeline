@@ -1,0 +1,5 @@
+for node in geu-master geu-worker1 geu-worker2; do
+  echo "=== $node ==="
+  ssh $node "pkill -u j_morando -f 'slim|simulate.py|python3'" 2>/dev/null
+  echo "done"
+done
