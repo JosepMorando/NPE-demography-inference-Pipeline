@@ -6,7 +6,7 @@ project:
 observed:
   pooldata_rdata: "observed_data/Pooldata_demography.RData"
   pooldata_object: "filt.pooldata"
-  groups_csv: "config/groups_11pops.csv"
+  groups_csv: "config/groups_12individuals.csv"
   target_cov: 10  # Configurable coverage threshold (easily changeable)
 
 simulation:
