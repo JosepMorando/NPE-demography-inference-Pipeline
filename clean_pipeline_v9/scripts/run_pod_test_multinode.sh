@@ -1,14 +1,12 @@
 #!/bin/bash
 #
-# POD Testing Workflow for Individual Populations Model (Multi-node)
+# POD Testing Workflow (Multi-node)
 # Validates the NPE pipeline using pseudo-observed data with known parameters.
 # Splits simulation work across multiple nodes and merges results.
 #
-# Tests the 12-population individual model with 59 free parameters.
-#
 # Usage:
-#   bash scripts/run_pod_test_multinode_individual.sh
-#   bash scripts/run_pod_test_multinode_individual.sh --reuse /path/to/existing/sim_data.npz
+#   bash scripts/run_pod_test_multinode.sh
+#   bash scripts/run_pod_test_multinode.sh --reuse /path/to/existing/sim_data.npz
 #
 # Environment variables:
 #   NODES="geu-master geu-worker1 geu-worker2"   (space-separated node names)
@@ -17,6 +15,7 @@
 #
 
 set -euo pipefail
+CONFIG="config/config_pod.yaml"
 
 # ---- Parse arguments ----
 REUSE_NPZ=""
@@ -35,16 +34,16 @@ while [[ $# -gt 0 ]]; do
 done
 
 echo "======================================================================"
-echo "POD TESTING WORKFLOW - INDIVIDUAL POPULATIONS MODEL (MULTI-NODE)"
+echo "POD TESTING WORKFLOW (MULTI-NODE)"
 echo "======================================================================"
 echo ""
-echo "This validates the individual populations pipeline (12 pops, 59 params)"
-echo "by testing if it can recover known parameters from synthetic data."
+echo "This validates the pipeline by testing if it can recover known"
+echo "parameters from synthetic data."
 echo ""
 
 # Configuration
-CONFIG="config/config_pod_individual.yaml"
-POD_DIR="pod_individual"
+CONFIG="config/config_pod.yaml"
+POD_DIR="pod_test"
 WORKERS_PER_NODE="${WORKERS_PER_NODE:-70}"
 NODES_STR="${NODES:-geu-master geu-worker1 geu-worker2}"
 ENABLE_SIM_COMPRESSION="${ENABLE_SIM_COMPRESSION:-0}"
@@ -59,17 +58,6 @@ export NUMEXPR_NUM_THREADS="${NUMEXPR_NUM_THREADS:-1}"
 mkdir -p "$POD_DIR"/{simulations,models,results,logs}
 
 PROJECT_ROOT="$(pwd)"
-
-# Validate required files
-echo "Validating configuration files..."
-for file in "$CONFIG" "config/groups_11pops.csv" "templates/model_individual_pops.slim.tpl"; do
-  if [[ ! -f "$file" ]]; then
-    echo "ERROR: Required file not found: $file"
-    exit 1
-  fi
-done
-echo "✓ All required files found"
-echo ""
 
 echo "Config: $CONFIG"
 echo "Nodes: ${NODES[*]}"
@@ -239,7 +227,6 @@ echo ""
 # ---- Step 3: Train ----
 echo "Step 3/7: Training neural spline flow..."
 echo "----------------------------------------------------------------------"
-echo "Note: Training 59-parameter model may take 2-4x longer than grouped model"
 echo "Started at: $(date)"
 python3 python/train_npe.py \
   --config "$CONFIG" \
@@ -286,26 +273,16 @@ python3 python/validate_ppc.py \
 echo ""
 
 echo "======================================================================"
-echo "POD TESTING COMPLETE - INDIVIDUAL POPULATIONS MODEL!"
+echo "POD TESTING COMPLETE!"
 echo "======================================================================"
 echo ""
-echo "Model tested: 12 populations, 59 free parameters"
 echo "Results saved to: $POD_DIR/results/"
 echo ""
 echo "Check parameter recovery:"
-echo "  - Coverage should be ~90-95% (acceptable: >85%)"
-echo "  - See plots and detailed report in $POD_DIR/results/"
+echo "  - Coverage should be ~90-95%"
+echo "  - See plots in $POD_DIR/results/"
 echo ""
-echo "Interpretation for 59-parameter model:"
-echo "  - Excellent: Coverage 90-100%"
-echo "  - Good:      Coverage 85-90%"
-echo "  - Warning:   Coverage 75-85% (consider more sims)"
-echo "  - Poor:      Coverage <75% (increase n_sims or check pipeline)"
-echo ""
-echo "If coverage is good, proceed with production analysis."
-echo "If coverage is suboptimal, consider:"
-echo "  - Increasing n_sims to 75k-100k"
-echo "  - Running hierarchical test (without bottlenecks first)"
-echo "  - Checking summary statistics quality"
+echo "If coverage is good (>85%), proceed with production analysis."
+echo "If coverage is poor (<80%), increase n_sims or check pipeline."
 echo ""
 echo "======================================================================"

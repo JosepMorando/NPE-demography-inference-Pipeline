@@ -1,64 +1,46 @@
 #!/bin/bash
 #
-# POD Testing Workflow for Individual Populations Model (Single-node)
+# POD Testing Workflow
 # Validates the NPE pipeline using pseudo-observed data with known parameters
-#
-# Tests the 12-population individual model with 59 free parameters.
 #
 
 set -euo pipefail
 
 echo "======================================================================"
-echo "POD TESTING WORKFLOW - INDIVIDUAL POPULATIONS MODEL"
+echo "POD TESTING WORKFLOW"
 echo "======================================================================"
 echo ""
-echo "This validates the individual populations pipeline (12 pops, 59 params)"
-echo "by testing if it can recover known parameters from synthetic data."
+echo "This validates the pipeline by testing if it can recover known"
+echo "parameters from synthetic data."
 echo ""
 
 # Configuration
-CONFIG="config/config_pod_individual.yaml"
-POD_DIR="pod_individual"
+CONFIG="config/config_pod.yaml"
+POD_DIR="pod_test"
 
 mkdir -p "$POD_DIR"/{simulations,models,results}
-
-# Validate required files
-echo "Validating configuration files..."
-for file in "$CONFIG" "config/groups_11pops.csv" "templates/model_individual_pops.slim.tpl"; do
-  if [[ ! -f "$file" ]]; then
-    echo "ERROR: Required file not found: $file"
-    exit 1
-  fi
-done
-echo "✓ All required files found"
-echo ""
 
 echo "Step 1/7: Generating pseudo-observed data..."
 echo "----------------------------------------------------------------------"
 python3 scripts/generate_pod.py --config "$CONFIG" --out "$POD_DIR"
 echo ""
 
-echo "Step 2/7: Generating training simulations (50,000 sims)..."
+echo "Step 2/7: Generating training simulations (5,000 sims)..."
 echo "----------------------------------------------------------------------"
-echo "Note: 59-parameter model requires more simulations"
-echo "This will take ~2-4 hours on single node..."
-echo "Started at: $(date)"
+echo "This will take ~30-60 minutes..."
 python3 python/simulate.py \
   --config "$CONFIG" \
   --out "$POD_DIR/simulations/sim_data.npz" \
-  --workers 30
-echo "Finished at: $(date)"
+  --workers 70
 echo ""
 
 echo "Step 3/7: Training neural spline flow..."
 echo "----------------------------------------------------------------------"
-echo "Note: Training 59-parameter model may take 30-60 minutes (or 2-4 hours on CPU)"
-echo "Started at: $(date)"
+echo "This will take ~10-20 minutes..."
 python3 python/train_npe.py \
   --config "$CONFIG" \
   --simulations "$POD_DIR/simulations/sim_data.npz" \
   --out "$POD_DIR/models/nsf_model.pt"
-echo "Finished at: $(date)"
 echo ""
 
 echo "Step 4/7: Inferring posterior for POD..."
@@ -66,8 +48,7 @@ echo "----------------------------------------------------------------------"
 python3 python/infer_posterior.py \
   --model "$POD_DIR/models/nsf_model.pt" \
   --obs "$POD_DIR/pod_summaries.npz" \
-  --out "$POD_DIR/results/pod_posterior.npz" \
-  --config "$CONFIG"
+  --out "$POD_DIR/results/pod_posterior.npz"
 echo ""
 
 echo "Step 5/7: Checking parameter recovery..."
@@ -97,29 +78,16 @@ python3 python/validate_ppc.py \
 echo ""
 
 echo "======================================================================"
-echo "POD TESTING COMPLETE - INDIVIDUAL POPULATIONS MODEL!"
+echo "POD TESTING COMPLETE!"
 echo "======================================================================"
 echo ""
-echo "Model tested: 12 populations, 59 free parameters"
 echo "Results saved to: $POD_DIR/results/"
 echo ""
 echo "Check parameter recovery:"
-echo "  - Coverage should be ~90-95% (acceptable: >85%)"
-echo "  - See plots and detailed report in $POD_DIR/results/"
+echo "  - Coverage should be ~90-95%"
+echo "  - See plots in $POD_DIR/results/"
 echo ""
-echo "Interpretation for 59-parameter model:"
-echo "  - Excellent: Coverage 90-100%"
-echo "  - Good:      Coverage 85-90%"
-echo "  - Warning:   Coverage 75-85% (consider more sims)"
-echo "  - Poor:      Coverage <75% (increase n_sims or check pipeline)"
-echo ""
-echo "If coverage is good, proceed with production analysis."
-echo "If coverage is suboptimal, consider:"
-echo "  - Increasing n_sims to 75k-100k"
-echo "  - Running hierarchical test (without bottlenecks first)"
-echo "  - Checking summary statistics quality"
-echo ""
-echo "For faster testing on multiple nodes, use:"
-echo "  bash scripts/run_pod_test_multinode_individual.sh"
+echo "If coverage is good (>85%), proceed with production analysis."
+echo "If coverage is poor (<80%), increase n_sims or check pipeline."
 echo ""
 echo "======================================================================"
