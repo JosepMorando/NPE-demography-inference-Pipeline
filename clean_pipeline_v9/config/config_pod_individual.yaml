@@ -23,7 +23,7 @@ simulation:
 
   # Timeline - moderate for POD testing
   burnin: 2000
-  gens: 12000
+  gens: 14000
   genome_length: 2e6  # 2 Mb for POD (lighter than 20 Mb production)
   recombination_rate: 1e-8
 
@@ -37,19 +37,31 @@ simulation:
 
 priors:
   times:
-    # Tighter ranges than production for faster POD convergence
-    # Following phylogeny constraints
+    # 1. Deepest Split: P001 vs everything else
     T_P001:             {min:  500, max: 1500}
-    T_BG01:             {min: 1500, max: 3000}
-    T_MAJOR_SPLIT:      {min: 3000, max: 5000}
-    T_Sauva:            {min: 5000, max: 7000}
-    T_BG07:             {min: 7000, max: 9000}
-    T_BG05_BG04:        {min: 9000, max: 11000}
-    T_Montsenymid:      {min: 5000, max: 7000}
-    T_PYRENEES:         {min: 7000, max: 9000}
-    T_Carlac:           {min: 9000, max: 11000}
-    T_Conangles_Viros:  {min: 11000, max: 13000}
-    T_Cimadal_Coscollet: {min: 9000, max: 11000}
+    
+    # 2. Next: BG01 splits from the main lineage (Parent: Node1)
+    T_BG01:             {min: 1600, max: 2800}
+    
+    # 3. Major Southern/Northern split (Parent: Node2)
+    T_MAJOR_SPLIT:      {min: 3000, max: 4500}
+    
+    # 4. Level 1 Nested Splits (Parent Southern: Node3 | Parent Northern: Node6)
+    T_Sauva:            {min: 5000, max: 6500}
+    T_Montsenymid:      {min: 5000, max: 6500}
+    
+    # 5. Level 2 Nested Splits (Parent BG07: Node4 | Parent Pyrenees: Node7)
+    T_BG07:             {min: 7000, max: 8500}
+    T_PYRENEES:         {min: 7000, max: 8500}
+    
+    # 6. Level 3 Nested Splits (Final pairs or nodes)
+    T_BG05_BG04:        {min: 9000, max: 10500} # Child of Node5
+    T_Carlac:           {min: 9000, max: 10500} # Child of Node8
+    T_Cimadal_Coscollet: {min: 9000, max: 10500} # Child of Node10
+    
+    # 7. Final Tips: Most recent split
+    # Maximum 13500 ensures it fits within 14000 gens safely
+    T_Conangles_Viros:  {min: 11500, max: 13500} # Child of Node9
 
   sizes:
     # FIXED: Ghost populations
